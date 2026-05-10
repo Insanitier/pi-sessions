@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { KeybindingsManager, Theme } from "@mariozechner/pi-coding-agent";
-import type { TUI } from "@mariozechner/pi-tui";
+import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionReferencePickerComponent } from "../extensions/session-handoff/picker.js";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.js";

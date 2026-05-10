@@ -35,9 +35,9 @@ We should borrow the good parts of `/resume`—overall layout, keyboard feel, an
 
 Reference implementation in Pi:
 
-- picker component: `node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/session-selector.js`
-- search behavior: `node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/session-selector-search.js`
-- `/resume` entrypoint: `node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/interactive-mode.js`
+- picker component: `node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector.js`
+- search behavior: `node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector-search.js`
+- `/resume` entrypoint: `node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js`
 
 ## Design Decisions
 
@@ -197,7 +197,7 @@ If quoted phrase support is added later, it should be a small additive improveme
 
 ### 10. Use a shared compact relative-time formatter based on `Intl`
 
-The picker should show compact relative times in the same style as Pi’s `/resume` picker UI in `node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/session-selector.js`, but we should rely on JavaScript’s built-in relative-time formatting instead of maintaining a handwritten formatter.
+The picker should show compact relative times in the same style as Pi’s `/resume` picker UI in `node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector.js`, but we should rely on JavaScript’s built-in relative-time formatting instead of maintaining a handwritten formatter.
 
 Use `Intl.RelativeTimeFormat` and apply two display tweaks:
 

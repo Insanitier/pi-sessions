@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
   isToolCallEventType,
   type ToolCallEvent,
   type ToolResultEvent,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   clearSessionIndexedData,
   getIndexStatus,

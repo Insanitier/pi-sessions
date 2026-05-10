@@ -1,5 +1,5 @@
-import type { Static, TSchema } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import type { Static, TSchema } from "typebox";
+import { Value } from "typebox/value";
 
 export function isTypeBoxValue<T extends TSchema>(schema: T, value: unknown): value is Static<T> {
   return Value.Check(schema, value);
@@ -51,11 +51,11 @@ export function safeParseTypeBoxJson<T extends TSchema>(
 }
 
 function formatTypeBoxError(schema: TSchema, value: unknown, context: string): string {
-  const firstError = Value.Errors(schema, value).First();
+  const firstError = Value.Errors(schema, value)[0];
   if (!firstError) {
     return `${context}: invalid value.`;
   }
 
-  const path = firstError.path.length > 0 ? firstError.path : "/";
+  const path = firstError.instancePath.length > 0 ? firstError.instancePath : "/";
   return `${context}: ${path} ${firstError.message}`;
 }

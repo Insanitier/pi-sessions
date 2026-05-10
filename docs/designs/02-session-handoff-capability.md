@@ -790,8 +790,8 @@ Existing references to reuse:
 - existing recall tool
   - `/Users/thurstonsand/Develop/pi-sessions/extensions/session-ask.ts`
 - Pi extension/session APIs
-  - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/extensions.md`
-  - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/session.md`
+  - `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md`
+  - `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/docs/session.md`
 - upstream handoff references
   - `https://github.com/pasky/pi-amplike/blob/main/extensions/handoff.ts`
   - `https://github.com/hjanuschka/shitty-extensions/blob/main/extensions/handoff.ts`

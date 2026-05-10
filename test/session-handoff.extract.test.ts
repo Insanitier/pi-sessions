@@ -10,8 +10,8 @@ const { completeMock } = vi.hoisted(() => ({
   completeMock: vi.fn(),
 }));
 
-vi.mock("@mariozechner/pi-ai", async () => {
-  const actual = await vi.importActual<object>("@mariozechner/pi-ai");
+vi.mock("@earendil-works/pi-ai", async () => {
+  const actual = await vi.importActual<object>("@earendil-works/pi-ai");
   return {
     ...actual,
     complete: completeMock,

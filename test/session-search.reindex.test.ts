@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { type SessionInfo, SessionManager } from "@mariozechner/pi-coding-agent";
+import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { rebuildSessionIndex } from "../extensions/session-search/reindex.js";
 import { openIndexDatabase, searchSessions } from "../extensions/shared/session-index/index.js";

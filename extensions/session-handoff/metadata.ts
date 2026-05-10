@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
-import type { CustomEntry, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { type Static, Type } from "@sinclair/typebox";
+import type { CustomEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { type Static, Type } from "typebox";
 import { safeParseTypeBoxValue } from "../shared/typebox.js";
 
 export const HANDOFF_METADATA_CUSTOM_TYPE = "pi-sessions.handoff";

@@ -2,15 +2,15 @@ import type {
   ExtensionCommandContext,
   ExtensionUIContext,
   Theme,
-} from "@mariozechner/pi-coding-agent";
-import type { Component } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import {
   Key,
   matchesKey,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 const PREVIEW_TIMEOUT_MS = 8_000;
 const PREVIEW_BODY_LINE_LIMIT = 16;

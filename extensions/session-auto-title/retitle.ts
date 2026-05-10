@@ -4,14 +4,14 @@ import {
   type Model,
   type TextContent,
   type UserMessage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
   SessionInfo,
-} from "@mariozechner/pi-coding-agent";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { RetitleMode, RetitleScope } from "./command.js";
 import { type AutoTitleContext, buildAutoTitleContext } from "./context.js";
 import type {

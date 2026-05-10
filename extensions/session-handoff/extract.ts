@@ -6,14 +6,14 @@ import {
   type ThinkingContent,
   type Tool,
   type ToolCall,
-} from "@mariozechner/pi-ai";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-ai";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   buildSessionContext,
   convertToLlm,
   serializeConversation,
-} from "@mariozechner/pi-coding-agent";
-import { type Static, Type } from "@sinclair/typebox";
+} from "@earendil-works/pi-coding-agent";
+import { type Static, Type } from "typebox";
 import { parseTypeBoxValue } from "../shared/typebox.js";
 
 const MAX_RELEVANT_FILES = 12;

@@ -1,15 +1,15 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import {
   type CustomEntry,
   parseSessionEntries,
   type SessionEntry,
   type SessionHeader,
   type SessionMessageEntry,
-} from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import {
   HANDOFF_METADATA_CUSTOM_TYPE,
   type HandoffSessionMetadata,

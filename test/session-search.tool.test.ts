@@ -5,8 +5,8 @@ import {
   initTheme,
   type ToolDefinition,
   ToolExecutionComponent,
-} from "@mariozechner/pi-coding-agent";
-import type { TUI } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.js";

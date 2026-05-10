@@ -1,7 +1,7 @@
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import {
   stripSearchSnippetMarkers,
   transformSearchSnippetMatches,

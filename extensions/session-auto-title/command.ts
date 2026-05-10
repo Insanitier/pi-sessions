@@ -1,5 +1,5 @@
-import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
 export const TITLE_USAGE = "Usage: /title [this|folder|pi] [-f]";
 

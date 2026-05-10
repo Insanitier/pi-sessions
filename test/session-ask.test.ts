@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sessionAskExtension from "../extensions/session-ask.js";
 import {
@@ -15,8 +15,8 @@ const { completeMock } = vi.hoisted(() => ({
   completeMock: vi.fn(),
 }));
 
-vi.mock("@mariozechner/pi-ai", async () => {
-  const actual = await vi.importActual<object>("@mariozechner/pi-ai");
+vi.mock("@earendil-works/pi-ai", async () => {
+  const actual = await vi.importActual<object>("@earendil-works/pi-ai");
   return {
     ...actual,
     complete: completeMock,

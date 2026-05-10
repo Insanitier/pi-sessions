@@ -1,6 +1,6 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { buildSessionContext } from "@mariozechner/pi-coding-agent";
-import { Key, matchesKey } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
   createHandoffBootstrap,

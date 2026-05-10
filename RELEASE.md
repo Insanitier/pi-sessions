@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.2.2
+
+Patch release for the Pi package scope migration.
+
+- Migrated Pi peer/dev dependencies and imports from `@mariozechner/*` to `@earendil-works/*`.
+- Migrated TypeBox imports from `@sinclair/typebox` to `typebox` for Pi 0.69+ compatibility.
+- Added a Node engine range matching current `better-sqlite3` support and pinned local development to Node 24.
+- Refreshed direct development dependencies and lockfile metadata.
+
 ## v0.2.1
 
 Patch release for Pi 0.70 replacement-session APIs and hook write reliability.

@@ -1,11 +1,11 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
   SessionStartEvent,
   TurnEndEvent,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   createSessionAutoTitleCommandHandler,
   getRetitleArgumentCompletions,

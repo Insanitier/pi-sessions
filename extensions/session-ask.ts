@@ -1,7 +1,7 @@
-import { complete, type Message } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { complete, type Message } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.js";
 import {
   getIndexStatus,

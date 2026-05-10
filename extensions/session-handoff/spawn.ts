@@ -6,7 +6,7 @@ import {
   type ExtensionAPI,
   type ExtensionCommandContext,
   type SessionHeader,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { HANDOFF_BOOTSTRAP_ENV } from "./metadata.js";
 
 const GHOSTTY_MACOS_ONLY_MESSAGE = "Split handoff currently supports Ghostty on macOS only.";

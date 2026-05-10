@@ -1,5 +1,5 @@
 import { renameSync } from "node:fs";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   createTempIndexPath,
   initializeSchema,

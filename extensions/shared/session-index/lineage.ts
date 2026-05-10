@@ -1,4 +1,4 @@
-import { type Static, Type } from "@sinclair/typebox";
+import { type Static, Type } from "typebox";
 import { parseTypeBoxRows, parseTypeBoxValue } from "../typebox.js";
 import {
   NULLABLE_STRING_SCHEMA,

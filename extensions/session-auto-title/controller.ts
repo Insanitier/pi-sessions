@@ -1,4 +1,4 @@
-import { buildSessionContext, type ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { buildSessionContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleSettings } from "../shared/settings.js";
 import {
   type AutoTitleMode,

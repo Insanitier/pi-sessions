@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type Static, Type } from "@sinclair/typebox";
+import { type Static, Type } from "typebox";
 import {
   type FileTouchOp,
   matchesRepoRoot,

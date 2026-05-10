@@ -501,10 +501,10 @@ No custom skill is planned for v1. The package should expose tools and package R
 Existing Pi behavior and structures to reuse:
 
 - Pi session file format and tree semantics
-  - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/session.md`
-  - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/tree.md`
+  - `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/docs/session.md`
+  - `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/docs/tree.md`
 - Pi package conventions
-  - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/packages.md`
+  - `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/docs/packages.md`
 - Existing `session_query` implementation as one reference for the new `session_ask` tool
   - local path: `/Users/thurstonsand/.pi/agent/git/github.com/pasky/pi-amplike/extensions/session-query.ts`
   - upstream repo: `https://github.com/pasky/pi-amplike`
@@ -520,9 +520,9 @@ Existing Pi behavior and structures to reuse:
     - `https://raw.githubusercontent.com/bdsqqq/dots/main/user/pi/packages/core/mentions/session-index.test.ts`
   - upstream repo: `https://github.com/bdsqqq/dots/tree/main/user/pi`
 - Built-in file-op extraction logic used for compaction and branch summaries
-  - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/compaction/utils.js`
+  - `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/utils.js`
 - SessionManager behavior and persisted leaf reconstruction
-  - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/session-manager.js`
+  - `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js`
 
 ## Steps
 

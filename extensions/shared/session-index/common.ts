@@ -1,5 +1,5 @@
-import { Type } from "@sinclair/typebox";
 import type Database from "better-sqlite3";
+import { Type } from "typebox";
 import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-search/normalize.js";
 import { safeParseTypeBoxJson } from "../typebox.js";
 

@@ -213,7 +213,7 @@ Patterns used in this codebase:
 ## Dependencies
 
 - **Runtime**: `better-sqlite3` (SQLite driver)
-- **Peer**: `@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`, `@sinclair/typebox` — provided by the Pi host
+- **Peer**: `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox` — provided by the Pi host
 - **Dev**: Biome, TypeScript, Vitest, type packages
 
 ## Settings

@@ -3,8 +3,8 @@ import {
   type ExtensionAPI,
   type ExtensionCommandContext,
   type Theme,
-} from "@mariozechner/pi-coding-agent";
-import { type Focusable, matchesKey, visibleWidth } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { type Focusable, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.js";
 import { getIndexStatus, type SessionIndexStatus } from "./shared/session-index/index.js";
 import { loadSettings } from "./shared/settings.js";

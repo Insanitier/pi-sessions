@@ -1,8 +1,8 @@
 import os from "node:os";
 import path from "node:path";
-import { SettingsManager } from "@mariozechner/pi-coding-agent";
-import type { KeyId } from "@mariozechner/pi-tui";
-import { type Static, Type } from "@sinclair/typebox";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { KeyId } from "@earendil-works/pi-tui";
+import { type Static, Type } from "typebox";
 import { parseTypeBoxValue } from "./typebox.js";
 
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
