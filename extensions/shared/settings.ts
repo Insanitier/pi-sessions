@@ -6,6 +6,19 @@ import { type Static, Type } from "typebox";
 import { parseTypeBoxValue } from "./typebox.js";
 
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
+export const DEFAULT_AUTO_TITLE_PROMPT = `You generate concrete coding session titles from the conversation provided.
+
+Return title text only.
+
+Rules:
+- Prefer 3-15 words.
+- Maximum 120 characters.
+- Use the full conversation, while letting the most recent work refine the title when needed.
+- Describe the current task, bug, feature, or investigation on the active branch.
+- Mention specific subsystem or file only when it improves clarity.
+- No quotes, markdown, emojis, prefixes, or explanations.
+- No trailing punctuation.
+- Avoid generic titles like Coding help or Working on project.`;
 const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   handoff: Type.Optional(
     Type.Object({
@@ -21,6 +34,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
     Type.Object({
       refreshTurns: Type.Optional(Type.Integer({ minimum: 1 })),
       model: Type.Optional(Type.String()),
+      prompt: Type.Optional(Type.String()),
     }),
   ),
 });
@@ -42,6 +56,7 @@ export class ModelReference {
 export interface AutoTitleSettings {
   refreshTurns: number;
   model: ModelReference | undefined;
+  prompt: string;
 }
 
 export interface SessionSettings {
@@ -113,6 +128,11 @@ function parseModelReference(value: string | undefined): ModelReference | undefi
   return new ModelReference(trimmed.slice(0, slashIndex), trimmed.slice(slashIndex + 1));
 }
 
+function normalizeAutoTitlePrompt(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : DEFAULT_AUTO_TITLE_PROMPT;
+}
+
 function loadSessionFileSettings(): SessionFileSettings {
   const globalSettings = SettingsManager.create(process.cwd()).getGlobalSettings();
   const parsed = parseTypeBoxValue(ROOT_SETTINGS_SCHEMA, globalSettings, "Invalid settings");
@@ -132,6 +152,7 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
     autoTitle: {
       refreshTurns: fileSettings.autoTitle?.refreshTurns ?? DEFAULT_AUTO_TITLE_REFRESH_TURNS,
       model: parseModelReference(fileSettings.autoTitle?.model),
+      prompt: normalizeAutoTitlePrompt(fileSettings.autoTitle?.prompt),
     },
   };
 }

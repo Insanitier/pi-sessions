@@ -8,12 +8,8 @@ import {
 import type { Focusable, TUI } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { RetitleCommandOutcome, RetitleMode, RetitleScope } from "./command.js";
-import {
-  type AutoRetitleStatus,
-  type AutoTitleFailure,
-  formatAutoTitleFailureSummary,
-  type SessionAutoTitleController,
-} from "./controller.js";
+import type { AutoRetitleStatus, SessionAutoTitleController } from "./controller.js";
+import type { AutoTitleFailure } from "./generate.js";
 import {
   buildBulkRetitleMessage,
   buildRetitleScopeScan,
@@ -60,6 +56,7 @@ export async function showRetitleWizard(
   ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
   getSessionEpoch: () => number,
+  systemPrompt: string,
   options?: RetitleWizardOptions,
 ): Promise<RetitleCommandOutcome> {
   return ctx.ui.custom<RetitleCommandOutcome>(
@@ -72,6 +69,7 @@ export async function showRetitleWizard(
         ctx,
         model,
         getSessionEpoch,
+        systemPrompt,
         done,
         options,
       ),
@@ -100,6 +98,7 @@ class RetitleWizardPanel implements Focusable {
     private readonly ctx: ExtensionCommandContext,
     private readonly model: Model<Api> | undefined,
     private readonly getSessionEpoch: () => number,
+    private readonly systemPrompt: string,
     private readonly done: (result: RetitleCommandOutcome) => void,
     options?: RetitleWizardOptions,
   ) {
@@ -250,6 +249,7 @@ class RetitleWizardPanel implements Focusable {
       ctx: this.ctx,
       model: this.model,
       isManual: true,
+      systemPrompt: this.systemPrompt,
       getSessionEpoch: this.getSessionEpoch,
     });
     if (result.ok) {
@@ -309,6 +309,7 @@ class RetitleWizardPanel implements Focusable {
       scan,
       mode,
       this.getSessionEpoch,
+      this.systemPrompt,
     );
     notifyBulkRetitleResult(this.ctx, scan, mode, result);
     this.done(
@@ -468,11 +469,7 @@ class RetitleWizardPanel implements Focusable {
       return this.renderRow(innerWidth, left);
     }
 
-    const summaryText = truncateToWidth(
-      formatAutoTitleFailureSummary(failure),
-      maxSummaryWidth,
-      "…",
-    );
+    const summaryText = truncateToWidth(failure.message, maxSummaryWidth, "…");
     const right = ` ${this.theme.fg("dim", summaryText)}`;
     const gap = Math.max(1, innerWidth - visibleWidth(left) - visibleWidth(right));
     return this.renderRow(innerWidth, `${left}${" ".repeat(gap)}${right}`);
@@ -523,7 +520,6 @@ function formatAutoRetitleStatusLine(theme: Theme, status: AutoRetitleStatus): s
 function formatFailureClipboardText(failure: AutoTitleFailure): string {
   const lines = [
     `model: ${failure.model}`,
-    ...(failure.status !== undefined ? [`status: ${failure.status}`] : []),
     `trigger: ${failure.trigger}`,
     `time: ${failure.at}`,
     `error: ${failure.message}`,

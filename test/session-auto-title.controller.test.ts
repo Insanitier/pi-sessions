@@ -79,6 +79,7 @@ describe("session auto-title controller", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
       model: undefined,
+      prompt: "Default auto-title prompt",
     });
     const { state, ctx } = createControllerContext();
 
@@ -103,6 +104,7 @@ describe("session auto-title controller", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 3,
       model: undefined,
+      prompt: "Default auto-title prompt",
     });
     const { state, ctx } = createControllerContext();
 
@@ -153,6 +155,7 @@ describe("session auto-title controller", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 2,
       model: undefined,
+      prompt: "Default auto-title prompt",
     });
     const { ctx } = createControllerContext({
       sessionName: "Investigate bug",
@@ -174,6 +177,7 @@ describe("session auto-title controller", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
       model: undefined,
+      prompt: "Default auto-title prompt",
     });
     const { ctx } = createControllerContext({
       sessionName: "Manual Title",
@@ -206,6 +210,7 @@ describe("session auto-title controller", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
       model: undefined,
+      prompt: "Default auto-title prompt",
     });
     const { ctx } = createControllerContext({
       sessionName: "Manual Title",
@@ -239,6 +244,7 @@ describe("session auto-title controller", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
       model: undefined,
+      prompt: "Default auto-title prompt",
     });
     const { ctx } = createControllerContext();
 
@@ -264,6 +270,7 @@ describe("session auto-title controller", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
       model: undefined,
+      prompt: "Default auto-title prompt",
     });
     const { ctx } = createControllerContext();
 
@@ -272,7 +279,6 @@ describe("session auto-title controller", () => {
       trigger: "periodic" as const,
       model: "google/gemini-3-flash-preview",
       message: "quota exceeded",
-      status: 429,
     };
 
     expect(controller.handleTitleFailed(ctx, failure)).toBe(true);

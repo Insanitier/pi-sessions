@@ -37,6 +37,7 @@ beforeEach(() => {
         provider: "google",
         modelId: "gemini-flash-lite-latest",
       },
+      prompt: "Default auto-title prompt",
     },
   });
 });
@@ -71,6 +72,44 @@ describe("session auto-title extension", () => {
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
     expect(completeSimpleMock.mock.calls[0]?.[0]).toEqual(currentModel);
     expect(pi.setSessionName).toHaveBeenCalledWith("Resolved Title");
+  });
+
+  it("uses the configured auto-title system prompt", async () => {
+    loadSettingsMock.mockReturnValue({
+      autoTitle: {
+        refreshTurns: 4,
+        model: {
+          provider: "google",
+          modelId: "gemini-flash-lite-latest",
+        },
+        prompt: "Name sessions like terse incident reports.",
+      },
+    });
+    const { default: sessionAutoTitleExtension } = await import(
+      "../extensions/session-auto-title.js"
+    );
+    const { commands, handlers, pi } = createExtensionApi();
+
+    sessionAutoTitleExtension(pi as never);
+
+    const sessionStart = handlers.get("session_start");
+    const title = commands.get("title");
+    const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
+    const ctx = createRetitleContext({
+      availableModels: [configuredModel],
+      currentModel: { provider: "openai", id: "gpt-5.4-mini" },
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Incident Report Title" }],
+    });
+
+    await sessionStart?.({}, ctx as never);
+    await title?.("", ctx as never);
+
+    expect(completeSimpleMock.mock.calls[0]?.[1]).toMatchObject({
+      systemPrompt: "Name sessions like terse incident reports.",
+    });
   });
 
   it("does not retry a second model after startup picks one resolved model", async () => {
@@ -140,44 +179,6 @@ describe("session auto-title extension", () => {
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "Auto-title failed: quota exceeded. Open /title for details.",
-      "warning",
-    );
-  });
-
-  it("normalizes structured provider errors into concise notifications", async () => {
-    const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.js"
-    );
-    const { handlers, pi } = createExtensionApi();
-
-    sessionAutoTitleExtension(pi as never);
-
-    const sessionStart = handlers.get("session_start");
-    const turnEnd = handlers.get("turn_end");
-    expect(sessionStart).toBeDefined();
-    expect(turnEnd).toBeDefined();
-
-    const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
-    const ctx = createRetitleContext({
-      availableModels: [configuredModel],
-      currentModel: { provider: "openai", id: "gpt-5.4-mini" },
-      hasUI: true,
-    });
-    completeSimpleMock.mockResolvedValue({
-      stopReason: "error",
-      errorMessage:
-        '{"type":"error","error":{"type":"authentication_error","message":"Unauthorized: Invalid or missing API key","code":"invalid_api_key"}}',
-      content: [],
-    });
-
-    await sessionStart?.({}, ctx as never);
-    await turnEnd?.({}, ctx as never);
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Auto-title failed: authentication_error · invalid_api_key · Invalid or missing API key. Open /title for details.",
       "warning",
     );
   });

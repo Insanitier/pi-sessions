@@ -14,7 +14,6 @@ import {
 } from "./session-auto-title/command.js";
 import {
   createSessionAutoTitleController,
-  formatAutoTitleFailureSummary,
   type SessionAutoTitleController,
 } from "./session-auto-title/controller.js";
 import { resolveAutoTitleModel } from "./session-auto-title/model.js";
@@ -74,6 +73,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
           ctx,
           model,
           invocation,
+          settings.autoTitle.prompt,
         );
       },
     ),
@@ -102,6 +102,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
       existingPlan: result.plan,
       getSessionEpoch: () => sessionEpoch,
       notifyOnSuccess: false,
+      systemPrompt: settings.autoTitle.prompt,
     })
       .then((outcome) => {
         if (outcome.ok) {
@@ -111,7 +112,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
         const shouldNotify = controller.handleTitleFailed(ctx, outcome.failure);
         if (shouldNotify && ctx.hasUI) {
           ctx.ui.notify(
-            `Auto-title failed: ${formatAutoTitleFailureSummary(outcome.failure)}. Open /title for details.`,
+            `Auto-title failed: ${outcome.failure.message}. Open /title for details.`,
             "warning",
           );
         }
@@ -136,6 +137,7 @@ async function handleTitleInvocation(
   ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
   invocation: RetitleCommandInvocation,
+  systemPrompt: string,
 ): Promise<RetitleCommandOutcome> {
   const retitleOpts = {
     pi,
@@ -143,6 +145,7 @@ async function handleTitleInvocation(
     ctx,
     model,
     isManual: true,
+    systemPrompt,
     getSessionEpoch: state.getSessionEpoch,
   };
 
@@ -161,7 +164,7 @@ async function handleTitleInvocation(
       return retitleCurrentSession();
     }
 
-    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch);
+    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, systemPrompt);
   }
 
   if (invocation.scope === "this") {
@@ -169,12 +172,20 @@ async function handleTitleInvocation(
   }
 
   if (ctx.hasUI && !invocation.force) {
-    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, {
-      initialInvocation: {
-        scope: invocation.scope,
-        mode: invocation.mode ?? "backfill",
+    return showRetitleWizard(
+      pi,
+      state.controller,
+      ctx,
+      model,
+      state.getSessionEpoch,
+      systemPrompt,
+      {
+        initialInvocation: {
+          scope: invocation.scope,
+          mode: invocation.mode ?? "backfill",
+        },
       },
-    });
+    );
   }
 
   const scan = await buildRetitleScopeScan(ctx, invocation.scope);
@@ -188,6 +199,7 @@ async function handleTitleInvocation(
       scan,
       mode,
       state.getSessionEpoch,
+      systemPrompt,
     );
     notifyBulkRetitleResult(ctx, scan, mode, result);
     return "success";

@@ -32,7 +32,7 @@ For npm releases, follow [RELEASE.md](./RELEASE.md).
 
 ## Project Structure
 
-```
+```sh
 extensions/                  # All source code
   session-search.ts          # "session_search" tool entry point
   session-ask.ts             # "session_ask" tool entry point
@@ -65,7 +65,7 @@ extensions/                  # All source code
     context.ts               # Conversation context extraction for title generation
     controller.ts            # Turn-counting trigger logic and state machine
     model.ts                 # Model resolution for title generation
-    prompt.ts                # System and user prompts, title normalization
+    generate.ts              # LLM title generation, prompt assembly, and response normalization
     retitle.ts               # Single and bulk retitle execution, scope scanning
     state.ts                 # Persisted state schema
     wizard.ts                # Interactive TUI wizard for multi-scope retitling
@@ -223,15 +223,14 @@ Global settings live under `sessions.*`.
 - `sessions.index.dir` overrides the default index directory
   - default DB path: `~/.pi/agent/pi-sessions/index.sqlite`
   - must be an absolute path or start with `~/`
-  - read from global settings only
 - `sessions.handoff.pickerShortcut`
   - default: `alt+o`
-  - read from global settings only
 - `sessions.autoTitle.refreshTurns`
   - minimum `1`, default `4`
   - number of turns between automatic title refreshes
-  - read from global settings only
 - `sessions.autoTitle.model`
   - format: `provider/modelId`
   - optional; when unset, prefer internal cheap fallback models and then the active session model
-  - read from global settings only
+- `sessions.autoTitle.prompt`
+  - optional custom system prompt for title generation
+  - blank values fall back to the built-in default prompt

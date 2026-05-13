@@ -1,5 +1,6 @@
 import { buildSessionContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleSettings } from "../shared/settings.js";
+import type { AutoTitleFailure } from "./generate.js";
 import {
   type AutoTitleMode,
   type AutoTitlePersistedState,
@@ -7,20 +8,6 @@ import {
   createAutoTitleState,
   getLatestAutoTitleState,
 } from "./state.js";
-
-export interface AutoTitleFailure {
-  at: string;
-  trigger: AutoTitleTrigger;
-  model: string;
-  message: string;
-  status?: number;
-}
-
-export function formatAutoTitleFailureSummary(failure: AutoTitleFailure): string {
-  return failure.status === undefined
-    ? failure.message
-    : `HTTP ${failure.status} · ${failure.message}`;
-}
 
 export interface SessionAutoTitleStateSnapshot {
   currentSessionFile: string | undefined;
@@ -294,5 +281,5 @@ function countUserTurns(messages: Array<{ role: string }>): number {
 }
 
 function formatFailureKey(failure: AutoTitleFailure): string {
-  return `${failure.model}\n${failure.status ?? ""}\n${failure.message}`;
+  return `${failure.model}\n${failure.message}`;
 }

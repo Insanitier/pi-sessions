@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_AUTO_TITLE_PROMPT,
   DEFAULT_AUTO_TITLE_REFRESH_TURNS,
   loadSettings,
   ModelReference,
@@ -28,6 +29,7 @@ describe("pi-sessions auto-title settings", () => {
     const settings = loadSettings();
     expect(settings.autoTitle.refreshTurns).toBe(DEFAULT_AUTO_TITLE_REFRESH_TURNS);
     expect(settings.autoTitle.model).toBeUndefined();
+    expect(settings.autoTitle.prompt).toBe(DEFAULT_AUTO_TITLE_PROMPT);
   });
 
   it("reads explicit auto-title settings from global settings", () => {
@@ -42,6 +44,7 @@ describe("pi-sessions auto-title settings", () => {
             autoTitle: {
               refreshTurns: 6,
               model: " openai/gpt-5.4-mini ",
+              prompt: " Use terse subsystem titles. ",
             },
           },
         },
@@ -59,6 +62,7 @@ describe("pi-sessions auto-title settings", () => {
       modelId: "gpt-5.4-mini",
     });
     expect(settings.autoTitle.model?.toString()).toBe("openai/gpt-5.4-mini");
+    expect(settings.autoTitle.prompt).toBe("Use terse subsystem titles.");
   });
 
   it("ignores project settings and only reads global auto-title settings", () => {
@@ -100,6 +104,27 @@ describe("pi-sessions auto-title settings", () => {
       modelId: "gemini-flash-lite-latest",
     });
     expect(settings.autoTitle.model?.toString()).toBe("google/gemini-flash-lite-latest");
+  });
+
+  it("uses the default auto-title prompt for blank prompt settings", () => {
+    const agentDir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify(
+        {
+          sessions: {
+            autoTitle: { prompt: "   " },
+          },
+        },
+        null,
+        2,
+      )}
+`,
+    );
+
+    expect(loadSettings().autoTitle.prompt).toBe(DEFAULT_AUTO_TITLE_PROMPT);
   });
 
   it("drops invalid auto-title model references", () => {

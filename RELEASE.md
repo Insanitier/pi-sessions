@@ -19,7 +19,7 @@ Patch release for Pi 0.70 replacement-session APIs and hook write reliability.
 - Added bounded retries and a short SQLite busy timeout for hook-maintained index writes.
 - Updated settings loading to use the current Pi settings API.
 
-# Release Process
+## Release Process
 
 Use this checklist to publish `pi-sessions` to npm.
 

@@ -26,7 +26,7 @@ beforeEach(() => {
   mockLoadSettings.mockReturnValue({
     handoff: { pickerShortcut: "alt+o" },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
-    autoTitle: { refreshTurns: 4, model: undefined },
+    autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
   });
   mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
 });
@@ -86,7 +86,7 @@ describe("session handoff extension", () => {
     mockLoadSettings.mockReturnValue({
       handoff: { pickerShortcut: "alt+p" },
       index: { path: "/tmp/pi-sessions/index.sqlite" },
-      autoTitle: { refreshTurns: 4, model: undefined },
+      autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
     });
 
     const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
