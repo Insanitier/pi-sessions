@@ -74,7 +74,7 @@ describe("session auto-title extension", () => {
     expect(pi.setSessionName).toHaveBeenCalledWith("Resolved Title");
   });
 
-  it("uses the configured auto-title system prompt", async () => {
+  it("uses the configured auto-title prompt in the user request", async () => {
     loadSettingsMock.mockReturnValue({
       autoTitle: {
         refreshTurns: 4,
@@ -107,9 +107,72 @@ describe("session auto-title extension", () => {
     await sessionStart?.({}, ctx as never);
     await title?.("", ctx as never);
 
-    expect(completeSimpleMock.mock.calls[0]?.[1]).toMatchObject({
+    const requestContext = completeSimpleMock.mock.calls[0]?.[1];
+    const promptText = requestContext?.messages[0]?.content[0]?.text;
+    expect(requestContext).toMatchObject({
       systemPrompt: "Name sessions like terse incident reports.",
     });
+    expect(promptText).toContain("<session_context>");
+    expect(promptText).toContain(
+      "<title_instructions>\nName sessions like terse incident reports.\n</title_instructions>",
+    );
+    expect(promptText).not.toContain("<current_title>");
+  });
+
+  it("adds current-title preservation instructions only for periodic retitles", async () => {
+    const { generateAutoTitle } = await import("../extensions/session-auto-title/generate.js");
+    const ctx = createRetitleContext({
+      availableModels: [],
+      currentModel: { provider: "openai", id: "gpt-5.4-mini" },
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Updated Title" }],
+    });
+
+    await generateAutoTitle(
+      ctx as never,
+      { provider: "openai", id: "gpt-5.4-mini" } as never,
+      {
+        cwd: "/repo/app",
+        currentTitle: "Existing Title",
+        conversationText: "user: keep working",
+        userTurnCount: 5,
+        assistantTurnCount: 4,
+      },
+      "manual",
+      "Name this coding session.",
+    );
+    await generateAutoTitle(
+      ctx as never,
+      { provider: "openai", id: "gpt-5.4-mini" } as never,
+      {
+        cwd: "/repo/app",
+        currentTitle: "Existing Title",
+        conversationText: "user: keep working",
+        userTurnCount: 5,
+        assistantTurnCount: 4,
+      },
+      "periodic",
+      "Name this coding session.",
+    );
+
+    const manualRequestContext = completeSimpleMock.mock.calls[0]?.[1];
+    const periodicRequestContext = completeSimpleMock.mock.calls[1]?.[1];
+    const manualPrompt = manualRequestContext.messages[0]?.content[0]?.text;
+    const periodicPrompt = periodicRequestContext.messages[0]?.content[0]?.text;
+    expect(manualRequestContext.systemPrompt).toBe("Name this coding session.");
+    expect(manualPrompt).toContain(
+      "<title_instructions>\nName this coding session.\n</title_instructions>",
+    );
+    expect(manualPrompt).not.toContain("<current_title>");
+    expect(periodicRequestContext.systemPrompt).toBe(
+      "Name this coding session.\n\nPreserve the current title unless the conversation has meaningfully shifted.",
+    );
+    expect(periodicPrompt).toContain("<current_title>Existing Title</current_title>");
+    expect(periodicPrompt).toContain(
+      "<title_instructions>\nName this coding session.\n\nPreserve the current title unless the conversation has meaningfully shifted.\n</title_instructions>",
+    );
   });
 
   it("does not retry a second model after startup picks one resolved model", async () => {

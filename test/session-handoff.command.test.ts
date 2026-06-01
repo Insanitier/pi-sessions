@@ -30,8 +30,8 @@ vi.mock("../extensions/session-handoff/review.js", async () => {
 
 vi.mock("../extensions/session-handoff/spawn.js", () => ({
   buildPiResumeCommand: vi.fn(
-    (sessionDir: string, sessionId: string, bootstrapValue: string) =>
-      `PI_SESSIONS_HANDOFF_BOOTSTRAP='${bootstrapValue}' pi --session-dir ${sessionDir} --session ${sessionId}`,
+    (sessionDir: string, sessionId: string, bootstrapValue: string, title: string) =>
+      `PI_SESSIONS_HANDOFF_BOOTSTRAP='${bootstrapValue}' pi --session-dir ${sessionDir} --session-id ${sessionId} --name '${title}'`,
   ),
   validateSplitHandoffPrerequisites: mockValidateSplitHandoffPrerequisites,
   createHandoffSession: mockCreateHandoffSession,
@@ -51,6 +51,7 @@ beforeEach(() => {
   mockGenerateHandoffDraft.mockResolvedValue({
     draft: "Generated handoff draft",
     context: {
+      title: "Finish phase 1",
       summary: "Summary",
       relevantFiles: [],
       nextTask: "Task",
@@ -103,26 +104,38 @@ describe("session handoff command", () => {
   });
 
   it("creates a prepared child session and switches into it for plain handoff", async () => {
-    const { handler } = await getHandoffCommand();
-    const ctx = createCommandContext();
+    vi.useFakeTimers();
+    try {
+      const { handler } = await getHandoffCommand();
+      const ctx = createCommandContext();
 
-    await handler("Finish phase 1", ctx as never);
+      await handler("Finish phase 1", ctx as never);
 
-    expect(mockCreateHandoffSession).toHaveBeenCalledWith({
-      cwd: "/tmp/project",
-      sessionDir: "/tmp/sessions",
-      parentSessionFile: "/tmp/session.jsonl",
-    });
-    expect(ctx.switchSession).toHaveBeenCalledWith("/tmp/sessions/child-session-123.jsonl", {
-      withSession: expect.any(Function),
-    });
-    expect(ctx.ui.notify).not.toHaveBeenCalledWith("Handoff started in a new session.", "info");
-    expect(ctx.replacementContext.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
-    expect(ctx.replacementContext.ui.notify).toHaveBeenCalledWith(
-      "Handoff started in a new session.",
-      "info",
-    );
-    expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
+      expect(mockCreateHandoffSession).not.toHaveBeenCalled();
+      expect(ctx.newSession).toHaveBeenCalledWith({
+        parentSession: "/tmp/session.jsonl",
+        setup: expect.any(Function),
+        withSession: expect.any(Function),
+      });
+      expect(ctx.sessionSetup.appendSessionInfo).toHaveBeenCalledWith("Finish phase 1");
+      expect(ctx.sessionSetup.appendCustomEntry).toHaveBeenCalledWith(
+        "pi-sessions.handoff",
+        expect.objectContaining({ title: "Finish phase 1" }),
+      );
+      expect(ctx.ui.notify).not.toHaveBeenCalledWith("Handoff started in a new session.", "info");
+      expect(ctx.replacementContext.sendUserMessage).not.toHaveBeenCalled();
+
+      await vi.runAllTimersAsync();
+
+      expect(ctx.replacementContext.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
+      expect(ctx.replacementContext.ui.notify).toHaveBeenCalledWith(
+        "Handoff started in a new session.",
+        "info",
+      );
+      expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("launches a split-pane handoff when a split flag is provided", async () => {
@@ -136,6 +149,7 @@ describe("session handoff command", () => {
       cwd: "/tmp/project",
       sessionDir: "/tmp/sessions",
       parentSessionFile: "/tmp/session.jsonl",
+      title: "Finish phase 1",
     });
     expect(mockLaunchSplitHandoffSession).toHaveBeenCalledWith(pi, {
       cwd: "/tmp/project",
@@ -143,7 +157,9 @@ describe("session handoff command", () => {
       direction: "right",
       sessionId: "child-session-123",
       bootstrapValue: expect.any(String),
+      title: "Finish phase 1",
     });
+    expect(ctx.newSession).not.toHaveBeenCalled();
     expect(ctx.switchSession).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new pane (right).", "info");
 
@@ -154,6 +170,7 @@ describe("session handoff command", () => {
       sessionId: "child-session-123",
       goal: "Finish phase 1",
       nextTask: "Task",
+      title: "Finish phase 1",
       initialPrompt: "Approved handoff draft",
     });
   });
@@ -271,6 +288,10 @@ function createPiApi(
 function createCommandContext(options?: { hasMessages?: boolean; switchCancelled?: boolean }) {
   const hasMessages = options?.hasMessages ?? true;
   const switchCancelled = options?.switchCancelled ?? false;
+  const sessionSetup = {
+    appendSessionInfo: vi.fn(),
+    appendCustomEntry: vi.fn(),
+  };
 
   const replacementContext = {
     hasUI: true,
@@ -339,17 +360,20 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
       },
     },
     replacementContext,
-    switchSession: vi.fn(
-      async (
-        _sessionPath: string,
-        options?: { withSession?: (ctx: typeof replacementContext) => Promise<void> },
-      ) => {
+    sessionSetup,
+    newSession: vi.fn(
+      async (options?: {
+        setup?: (sessionManager: typeof sessionSetup) => Promise<void>;
+        withSession?: (ctx: typeof replacementContext) => Promise<void>;
+      }) => {
         if (!switchCancelled) {
+          await options?.setup?.(sessionSetup);
           await options?.withSession?.(replacementContext);
         }
 
         return { cancelled: switchCancelled };
       },
     ),
+    switchSession: vi.fn(),
   };
 }

@@ -6,6 +6,7 @@ import {
   type ExtensionAPI,
   type ExtensionCommandContext,
   type SessionHeader,
+  type SessionInfoEntry,
 } from "@earendil-works/pi-coding-agent";
 import { HANDOFF_BOOTSTRAP_ENV } from "./metadata.js";
 
@@ -44,6 +45,7 @@ export function createHandoffSession(options: {
   cwd: string;
   sessionDir: string;
   parentSessionFile: string;
+  title: string;
 }): CreatedHandoffSession {
   const sessionId = randomUUID();
   const timestamp = new Date().toISOString();
@@ -59,7 +61,18 @@ export function createHandoffSession(options: {
     parentSession: options.parentSessionFile,
   };
 
-  writeFileSync(sessionFile, `${JSON.stringify(header)}\n`);
+  const titleEntry: SessionInfoEntry = {
+    type: "session_info",
+    id: randomUUID(),
+    parentId: null,
+    timestamp,
+    name: options.title,
+  };
+
+  writeFileSync(
+    sessionFile,
+    `${[JSON.stringify(header), JSON.stringify(titleEntry)].join("\n")}\n`,
+  );
 
   return { sessionId, sessionFile };
 }
@@ -72,12 +85,14 @@ export async function launchSplitHandoffSession(
     direction: HandoffSplitDirection;
     sessionId: string;
     bootstrapValue: string;
+    title: string;
   },
 ): Promise<{ success: true } | { success: false; error: string }> {
   const piCommand = buildPiLaunchCommand(
     options.sessionDir,
     options.sessionId,
     options.bootstrapValue,
+    options.title,
   );
   const escapedCwd = escapeAppleScriptString(options.cwd);
   const escapedCommand = escapeAppleScriptString(piCommand);
@@ -113,23 +128,29 @@ export function buildPiResumeCommand(
   sessionDir: string,
   sessionId: string,
   bootstrapValue: string,
+  title: string,
 ): string {
-  return [
+  const args = [
     `${HANDOFF_BOOTSTRAP_ENV}=${shellQuote(bootstrapValue)}`,
     "pi",
     "--session-dir",
     shellQuote(sessionDir),
-    "--session",
+    "--session-id",
     shellQuote(sessionId),
-  ].join(" ");
+    "--name",
+    shellQuote(title),
+  ];
+
+  return args.join(" ");
 }
 
 export function buildPiLaunchCommand(
   sessionDir: string,
   sessionId: string,
   bootstrapValue: string,
+  title: string,
 ): string {
-  const payload = `${buildPiResumeCommand(sessionDir, sessionId, bootstrapValue)}; exec /bin/zsh -il`;
+  const payload = `${buildPiResumeCommand(sessionDir, sessionId, bootstrapValue, title)}; exec /bin/zsh -il`;
   return `/bin/zsh -ilc ${shellQuote(payload)}`;
 }
 

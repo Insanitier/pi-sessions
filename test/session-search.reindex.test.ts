@@ -147,6 +147,7 @@ describe("rebuildSessionIndex", () => {
           origin: "handoff",
           goal: "Finish the split",
           nextTask: "Implement autocomplete",
+          title: "Implement autocomplete",
           initial_prompt: "Finish the split",
         },
       },

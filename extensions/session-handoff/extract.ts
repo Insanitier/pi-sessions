@@ -18,6 +18,7 @@ import { parseTypeBoxValue } from "../shared/typebox.js";
 
 const MAX_RELEVANT_FILES = 12;
 const MAX_OPEN_QUESTIONS = 8;
+const MAX_HANDOFF_TITLE_LENGTH = 64;
 
 const HANDOFF_SYSTEM_PROMPT = `You extract context for a deliberate session handoff.
 
@@ -27,12 +28,16 @@ Rules:
 - Extract only context that is relevant to the next task.
 - Keep the summary compact and concrete.
 - Prefer workspace-relative file paths when possible.
+- title must be a short session title for the new handoff thread, 64 characters or less, without prefixes like "Handoff:" or otherwise referencing the current thread.
 - nextTask must be the concrete next action for the new session.
 - openQuestions should contain only unresolved items that materially affect the next task.
 - If there are no meaningful open questions, omit openQuestions entirely.
 - Do not write the final handoff prompt yourself.`;
 
 const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
+  title: Type.String({
+    description: "Short display title for the new handoff session.",
+  }),
   summary: Type.String({
     description: "Only the context relevant to the next task.",
   }),
@@ -58,11 +63,13 @@ const HANDOFF_EXTRACTION_TOOL: Tool<typeof HANDOFF_EXTRACTION_PARAMETERS> = {
 type RequiredHandoffExtractionArgs = Static<typeof REQUIRED_HANDOFF_EXTRACTION_PARAMETERS>;
 
 const REQUIRED_HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
+  title: HANDOFF_EXTRACTION_PARAMETERS.properties.title,
   summary: HANDOFF_EXTRACTION_PARAMETERS.properties.summary,
   nextTask: HANDOFF_EXTRACTION_PARAMETERS.properties.nextTask,
 });
 
 export interface HandoffContext {
+  title: string;
   summary: string;
   relevantFiles: string[];
   nextTask: string;
@@ -139,10 +146,12 @@ export async function generateHandoffDraft(
     throw new Error(response.errorMessage ?? "Handoff generation failed.");
   }
 
-  const handoffContext = extractHandoffContext(response, goal);
-  if (!handoffContext) {
-    throw new Error("Handoff extraction did not return structured context.");
+  const extraction = extractHandoffContext(response, goal);
+  if (!extraction.context) {
+    throw new Error(extraction.error);
   }
+
+  const handoffContext = extraction.context;
 
   const sessionId = ctx.sessionManager.getSessionId();
   const sessionPath = ctx.sessionManager.getSessionFile();
@@ -208,10 +217,10 @@ export function assembleHandoffDraft(
 export function extractHandoffContext(
   response: AssistantMessage,
   goal: string,
-): HandoffContext | undefined {
+): { context: HandoffContext; error?: undefined } | { context?: undefined; error: string } {
   const toolCall = response.content.find(isCreateHandoffContextToolCall);
   if (!toolCall) {
-    return undefined;
+    return { error: "Handoff extraction did not return structured context." };
   }
 
   let requiredArguments: RequiredHandoffExtractionArgs;
@@ -222,7 +231,12 @@ export function extractHandoffContext(
       "Invalid create_handoff_context arguments",
     );
   } catch {
-    return undefined;
+    return { error: "Handoff extraction did not return structured context." };
+  }
+
+  const title = normalizeText(requiredArguments.title);
+  if (title.length > MAX_HANDOFF_TITLE_LENGTH) {
+    return { error: "Handoff title must be 64 characters or less." };
   }
 
   const summary = normalizeText(requiredArguments.summary);
@@ -230,15 +244,18 @@ export function extractHandoffContext(
   const nextTask = normalizeText(requiredArguments.nextTask) || goal.trim();
   const openQuestions = normalizeStringArray(toolCall.arguments.openQuestions, MAX_OPEN_QUESTIONS);
 
-  if (!summary || !nextTask) {
-    return undefined;
+  if (!summary || !nextTask || !title) {
+    return { error: "Handoff extraction did not return structured context." };
   }
 
   return {
-    summary,
-    relevantFiles,
-    nextTask,
-    openQuestions,
+    context: {
+      title,
+      summary,
+      relevantFiles,
+      nextTask,
+      openQuestions,
+    },
   };
 }
 

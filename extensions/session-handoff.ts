@@ -27,6 +27,11 @@ import { loadSettings } from "./shared/settings.js";
 
 const HANDOFF_USAGE = "Usage: /handoff [--left|--right|--up|--down] <goal for new thread>";
 
+interface HandoffPromptContext {
+  ui: ExtensionCommandContext["ui"];
+  sendUserMessage(content: string): Promise<void>;
+}
+
 export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
 
@@ -99,28 +104,30 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         parsedArgs.goal,
         generatedDraft.context.nextTask,
         approvedDraft,
+        generatedDraft.context.title,
       );
-      const createdSession = createHandoffSession({
-        cwd: ctx.cwd,
-        sessionDir: ctx.sessionManager.getSessionDir(),
-        parentSessionFile,
-      });
-      const bootstrapValue = encodeHandoffBootstrap(
-        createHandoffBootstrap(createdSession.sessionId, handoffMetadata),
-      );
-
       if (parsedArgs.splitDirection) {
+        const createdSession = createHandoffSession({
+          cwd: ctx.cwd,
+          sessionDir: ctx.sessionManager.getSessionDir(),
+          parentSessionFile,
+          title: handoffMetadata.title,
+        });
+        const bootstrapValue = encodeHandoffBootstrap(
+          createHandoffBootstrap(createdSession.sessionId, handoffMetadata),
+        );
         const launchResult = await launchSplitHandoffSession(pi, {
           cwd: ctx.cwd,
           sessionDir: ctx.sessionManager.getSessionDir(),
           direction: parsedArgs.splitDirection,
           sessionId: createdSession.sessionId,
           bootstrapValue,
+          title: handoffMetadata.title,
         });
 
         if (!launchResult.success) {
           ctx.ui.notify(
-            `${launchResult.error} Created handoff session ${createdSession.sessionId}; start it manually with: ${buildPiResumeCommand(ctx.sessionManager.getSessionDir(), createdSession.sessionId, bootstrapValue)}`,
+            `${launchResult.error} Created handoff session ${createdSession.sessionId}; start it manually with: ${buildPiResumeCommand(ctx.sessionManager.getSessionDir(), createdSession.sessionId, bootstrapValue, handoffMetadata.title)}`,
             "error",
           );
           return;
@@ -130,10 +137,14 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const switchResult = await ctx.switchSession(createdSession.sessionFile, {
+      const switchResult = await ctx.newSession({
+        parentSession: parentSessionFile,
+        setup: async (sessionManager) => {
+          sessionManager.appendSessionInfo(handoffMetadata.title);
+          sessionManager.appendCustomEntry(HANDOFF_METADATA_CUSTOM_TYPE, handoffMetadata);
+        },
         withSession: async (nextCtx) => {
-          await nextCtx.sendUserMessage(approvedDraft);
-          nextCtx.ui.notify("Handoff started in a new session.", "info");
+          startHandoffPromptAfterSessionRender(nextCtx, approvedDraft);
         },
       });
 
@@ -191,8 +202,17 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
       if (!getHandoffMetadataFromEntries(entries)) {
         pi.appendEntry(
           HANDOFF_METADATA_CUSTOM_TYPE,
-          createHandoffSessionMetadata(bootstrap.goal, bootstrap.nextTask, bootstrap.initialPrompt),
+          createHandoffSessionMetadata(
+            bootstrap.goal,
+            bootstrap.nextTask,
+            bootstrap.initialPrompt,
+            bootstrap.title,
+          ),
         );
+      }
+
+      if (!ctx.sessionManager.getSessionName()) {
+        pi.setSessionName(bootstrap.title);
       }
 
       pi.sendUserMessage(bootstrap.initialPrompt);
@@ -264,6 +284,23 @@ async function runWithLoader<T>(
   }
 
   return result;
+}
+
+function startHandoffPromptAfterSessionRender(
+  ctx: HandoffPromptContext,
+  approvedDraft: string,
+): void {
+  // ctx.newSession() renders the replacement session only after withSession returns.
+  setImmediate(() => {
+    void (async () => {
+      try {
+        await ctx.sendUserMessage(approvedDraft);
+        ctx.ui.notify("Handoff started in a new session.", "info");
+      } catch (error) {
+        ctx.ui.notify(formatHandoffError(error), "error");
+      }
+    })();
+  });
 }
 
 function formatHandoffError(error: unknown): string {

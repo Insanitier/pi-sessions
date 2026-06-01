@@ -12,6 +12,7 @@ export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
   origin: Type.Literal("handoff"),
   goal: Type.String(),
   nextTask: Type.String(),
+  title: Type.String(),
   initial_prompt: Type.String(),
 });
 
@@ -19,6 +20,7 @@ export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   sessionId: Type.String(),
   goal: Type.String(),
   nextTask: Type.String(),
+  title: Type.String(),
   initialPrompt: Type.String(),
 });
 
@@ -29,6 +31,7 @@ export function createHandoffSessionMetadata(
   goal: string,
   nextTask: string,
   initialPrompt: string,
+  title: string,
 ): HandoffSessionMetadata {
   const normalizedGoal = goal.trim();
   const normalizedNextTask = nextTask.trim() || normalizedGoal;
@@ -37,6 +40,7 @@ export function createHandoffSessionMetadata(
     origin: "handoff",
     goal: normalizedGoal,
     nextTask: normalizedNextTask,
+    title,
     initial_prompt: initialPrompt.trim(),
   };
 }
@@ -49,6 +53,7 @@ export function createHandoffBootstrap(
     sessionId,
     goal: metadata.goal,
     nextTask: metadata.nextTask,
+    title: metadata.title,
     initialPrompt: metadata.initial_prompt,
   };
 }

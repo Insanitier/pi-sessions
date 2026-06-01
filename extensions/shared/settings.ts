@@ -6,19 +6,7 @@ import { type Static, Type } from "typebox";
 import { parseTypeBoxValue } from "./typebox.js";
 
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
-export const DEFAULT_AUTO_TITLE_PROMPT = `You generate concrete coding session titles from the conversation provided.
-
-Return title text only.
-
-Rules:
-- Prefer 3-15 words.
-- Maximum 120 characters.
-- Use the full conversation, while letting the most recent work refine the title when needed.
-- Describe the current task, bug, feature, or investigation on the active branch.
-- Mention specific subsystem or file only when it improves clarity.
-- No quotes, markdown, emojis, prefixes, or explanations.
-- No trailing punctuation.
-- Avoid generic titles like Coding help or Working on project.`;
+export const DEFAULT_AUTO_TITLE_PROMPT = `Name this coding session (under 80 chars). Be specific to what is being discussed. Your exact output will be displayed to the user, so make sure that it contains ONLY the title itself and nothing else.`;
 const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   handoff: Type.Optional(
     Type.Object({

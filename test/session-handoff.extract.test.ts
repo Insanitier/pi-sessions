@@ -28,6 +28,7 @@ describe("session handoff extraction", () => {
       "session-123",
       "/tmp/session.jsonl",
       {
+        title: "Implement handoff command",
         summary: "Relevant context only.",
         relevantFiles: ["src/index.ts", "README.md"],
         nextTask: "Implement the command.",
@@ -46,7 +47,7 @@ describe("session handoff extraction", () => {
   });
 
   it("extracts and normalizes structured tool-call arguments", () => {
-    const handoffContext = extractHandoffContext(
+    const extraction = extractHandoffContext(
       {
         role: "assistant",
         api: "openai-responses",
@@ -68,6 +69,7 @@ describe("session handoff extraction", () => {
             id: "call-1",
             name: "create_handoff_context",
             arguments: {
+              title: "  Implement handoff command  ",
               summary: "  Keep this.  ",
               relevantFiles: [" src/index.ts ", "src/index.ts", "", 1],
               nextTask: "  Implement the command. ",
@@ -79,11 +81,14 @@ describe("session handoff extraction", () => {
       "fallback goal",
     );
 
-    expect(handoffContext).toEqual({
-      summary: "Keep this.",
-      relevantFiles: ["src/index.ts"],
-      nextTask: "Implement the command.",
-      openQuestions: ["Should tests cover cancel?"],
+    expect(extraction).toEqual({
+      context: {
+        title: "Implement handoff command",
+        summary: "Keep this.",
+        relevantFiles: ["src/index.ts"],
+        nextTask: "Implement the command.",
+        openQuestions: ["Should tests cover cancel?"],
+      },
     });
   });
 
@@ -109,6 +114,7 @@ describe("session handoff extraction", () => {
           id: "call-1",
           name: "create_handoff_context",
           arguments: {
+            title: "Finish handoff phase 1",
             summary: "The command is partly implemented.",
             relevantFiles: ["extensions/session-handoff.ts"],
             nextTask: "Finish phase 1 and verify it.",
@@ -121,6 +127,7 @@ describe("session handoff extraction", () => {
     const result = await generateHandoffDraft(createGenerationContext(), "Finish phase 1.");
 
     expect(result?.sessionId).toBe("session-123");
+    expect(result?.context.title).toBe("Finish handoff phase 1");
     expect(result?.draft).toContain("## Task\nFinish phase 1 and verify it.");
     expect(result?.draft).toContain("## Relevant Files\n- extensions/session-handoff.ts");
     expect(result?.draft).toContain("## Context\nThe command is partly implemented.");
@@ -130,6 +137,43 @@ describe("session handoff extraction", () => {
     expect(model).toEqual({ provider: "openai", id: "gpt-5.4" });
     expect(context.tools).toHaveLength(1);
     expect(options).toMatchObject({ apiKey: "test-key", toolChoice: "any" });
+  });
+
+  it("rejects generated titles longer than 64 characters", async () => {
+    completeMock.mockResolvedValue({
+      role: "assistant",
+      api: "openai-responses",
+      provider: "openai",
+      model: "gpt-5.4",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+      content: [
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "create_handoff_context",
+          arguments: {
+            title:
+              "This generated handoff title is intentionally much longer than sixty four characters",
+            summary: "The command is partly implemented.",
+            relevantFiles: [],
+            nextTask: "Finish phase 1 and verify it.",
+          },
+        },
+      ],
+    });
+
+    await expect(
+      generateHandoffDraft(createGenerationContext(), "Finish phase 1."),
+    ).rejects.toThrow("Handoff title must be 64 characters or less.");
   });
 
   it("rejects responses without the structured tool call", async () => {

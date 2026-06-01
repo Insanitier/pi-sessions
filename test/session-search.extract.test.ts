@@ -181,6 +181,7 @@ describe("extractSessionRecord", () => {
           origin: "handoff",
           goal: "Continue phase 3",
           nextTask: "Implement autocomplete",
+          title: "Implement autocomplete",
           initial_prompt: "Continue phase 3",
         },
       },

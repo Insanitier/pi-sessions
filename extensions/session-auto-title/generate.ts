@@ -1,3 +1,6 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   type Api,
   completeSimple,
@@ -11,7 +14,7 @@ import type { AutoTitleTrigger } from "./state.js";
 
 const AUTO_TITLE_REQUEST_TIMEOUT_MS = 15_000;
 const AUTO_TITLE_MAX_TOKENS = 64;
-const AUTO_TITLE_CHAR_MAX = 120;
+const AUTO_TITLE_CHAR_MAX = 80;
 
 export interface AutoTitleFailure {
   at: string;
@@ -56,9 +59,12 @@ export async function generateAutoTitle(
     };
   }
 
+  const shouldPreserveTitle = trigger === "periodic" && Boolean(context.currentTitle?.trim());
+  const resolvedSystemPrompt = buildAutoTitleSystemPrompt(systemPrompt, shouldPreserveTitle);
+  const userPrompt = buildAutoTitlePrompt(context, resolvedSystemPrompt, shouldPreserveTitle);
   const message: UserMessage = {
     role: "user",
-    content: [{ type: "text", text: buildAutoTitlePrompt(context, trigger) }],
+    content: [{ type: "text", text: userPrompt }],
     timestamp: Date.now(),
   };
 
@@ -66,19 +72,18 @@ export async function generateAutoTitle(
   const timeoutId = setTimeout(() => abortController.abort(), AUTO_TITLE_REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await completeSimple(
-      model,
-      {
-        systemPrompt,
-        messages: [message],
-      },
-      {
-        ...(auth.apiKey && { apiKey: auth.apiKey }),
-        ...(auth.headers && { headers: auth.headers }),
-        maxTokens: AUTO_TITLE_MAX_TOKENS,
-        signal: abortController.signal,
-      },
-    );
+    const requestContext = {
+      systemPrompt: resolvedSystemPrompt,
+      messages: [message],
+    };
+    writeAutoTitleDebugRequest(model, trigger, requestContext);
+    const response = await completeSimple(model, requestContext, {
+      ...(auth.apiKey && { apiKey: auth.apiKey }),
+      ...(auth.headers && { headers: auth.headers }),
+      maxTokens: AUTO_TITLE_MAX_TOKENS,
+      signal: abortController.signal,
+    });
+    writeAutoTitleDebugResponse(model, trigger, response);
 
     if (response.stopReason === "error" || response.stopReason === "aborted") {
       const fallbackMessage =
@@ -124,19 +129,36 @@ export function createAutoTitleFailure(
   };
 }
 
-function buildAutoTitlePrompt(context: AutoTitleContext, trigger: AutoTitleTrigger): string {
-  const sections = [
-    ["## Trigger", trigger],
-    ["## Current Title", context.currentTitle ?? "(none)"],
-    ["## Counts", formatCounts(context)],
-    ["## Conversation", context.conversationText || "(none)"],
-  ];
-
-  if (context.cwd) {
-    sections.unshift(["## Cwd", context.cwd]);
+function buildAutoTitleSystemPrompt(systemPrompt: string, shouldPreserveTitle: boolean): string {
+  if (!shouldPreserveTitle) {
+    return systemPrompt;
   }
 
-  return sections.map(([heading, body]) => `${heading}\n${body}`).join("\n\n");
+  return `${systemPrompt}\n\nPreserve the current title unless the conversation has meaningfully shifted.`;
+}
+
+function buildAutoTitlePrompt(
+  context: AutoTitleContext,
+  titleInstructions: string,
+  shouldPreserveTitle: boolean,
+): string {
+  const sections = ["Generate the title from this session context.", "<session_context>"];
+
+  if (context.cwd) {
+    sections.push(`<cwd>${context.cwd}</cwd>`);
+  }
+
+  sections.push(`<counts>\n${formatCounts(context)}\n</counts>`);
+
+  if (shouldPreserveTitle) {
+    sections.push(`<current_title>${context.currentTitle ?? ""}</current_title>`);
+  }
+
+  sections.push(`<conversation>\n${context.conversationText || "(none)"}\n</conversation>`);
+  sections.push("</session_context>");
+  sections.push(`<title_instructions>\n${titleInstructions}\n</title_instructions>`);
+
+  return sections.join("\n\n");
 }
 
 function normalizeGeneratedAutoTitle(value: string): string | undefined {
@@ -151,6 +173,45 @@ function normalizeGeneratedAutoTitle(value: string): string | undefined {
 
   const truncated = collapsed.slice(0, AUTO_TITLE_CHAR_MAX).trim();
   return truncated || undefined;
+}
+
+function writeAutoTitleDebugRequest(
+  model: Model<Api>,
+  trigger: AutoTitleTrigger,
+  request: unknown,
+): void {
+  writeAutoTitleDebugEntry({
+    phase: "request",
+    trigger,
+    model: formatModelLabel(model),
+    request,
+  });
+}
+
+function writeAutoTitleDebugResponse(
+  model: Model<Api>,
+  trigger: AutoTitleTrigger,
+  response: unknown,
+): void {
+  writeAutoTitleDebugEntry({
+    phase: "response",
+    trigger,
+    model: formatModelLabel(model),
+    response,
+  });
+}
+
+function writeAutoTitleDebugEntry(entry: Record<string, unknown>): void {
+  try {
+    const dir = join(homedir(), ".pi", "agent", "pi-sessions");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(
+      join(dir, "auto-title-debug.jsonl"),
+      `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
+    );
+  } catch {
+    // Debug logging must not affect title generation.
+  }
 }
 
 function extractResponseText(content: unknown[]): string {

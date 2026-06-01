@@ -133,6 +133,7 @@ describe("session handoff extension", () => {
           "Finish phase 1",
           "Implement autocomplete",
           "Approved handoff draft",
+          "Implement autocomplete",
         ),
       ),
     );
@@ -146,9 +147,11 @@ describe("session handoff extension", () => {
         origin: "handoff",
         goal: "Finish phase 1",
         nextTask: "Implement autocomplete",
+        title: "Implement autocomplete",
         initial_prompt: "Approved handoff draft",
       }),
     );
+    expect(pi.setSessionName).toHaveBeenCalledWith("Implement autocomplete");
     expect(pi.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
     expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
   });
@@ -167,6 +170,7 @@ describe("session handoff extension", () => {
           "Finish phase 1",
           "Implement autocomplete",
           "Approved handoff draft",
+          "Implement autocomplete",
         ),
       ),
     );
@@ -209,6 +213,7 @@ describe("session handoff extension", () => {
           "Finish phase 1",
           "Implement autocomplete",
           "Approved handoff draft",
+          "Implement autocomplete",
         ),
       ),
     );
@@ -226,6 +231,7 @@ describe("session handoff extension", () => {
             "Finish phase 1",
             "Implement autocomplete",
             "Approved handoff draft",
+            "Implement autocomplete",
           ),
         },
       ],
@@ -246,6 +252,7 @@ function createPiApi(
   return {
     appendEntry: vi.fn(),
     sendUserMessage: vi.fn(),
+    setSessionName: vi.fn(),
     registerCommand,
     registerShortcut: vi.fn(
       (shortcut: string, definition: { handler: (ctx: unknown) => Promise<void> }) => {
@@ -271,6 +278,9 @@ function createSessionStartContext(options: { sessionId: string; entries?: unkno
       },
       getEntries() {
         return options.entries ?? [];
+      },
+      getSessionName() {
+        return undefined;
       },
       appendCustomEntry: vi.fn(),
     },

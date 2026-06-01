@@ -23,25 +23,32 @@ afterEach(() => {
 });
 
 describe("session handoff spawn helpers", () => {
-  it("creates a header-only child session file with parent lineage", () => {
+  it("creates a child session file with parent lineage and optional title", () => {
     const sessionDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-spawn-"));
 
     const created = createHandoffSession({
       cwd: "/tmp/project",
       sessionDir,
       parentSessionFile: "/tmp/project/parent.jsonl",
+      title: "Implement autocomplete",
     });
 
     const lines = readFileSync(created.sessionFile, "utf8").trim().split("\n");
-    expect(lines).toHaveLength(1);
+    expect(lines).toHaveLength(2);
 
     const header = JSON.parse(lines[0] ?? "{}");
+    const sessionInfo = JSON.parse(lines[1] ?? "{}");
 
     expect(created.sessionId).toBe(header.id);
     expect(header).toMatchObject({
       type: "session",
       cwd: "/tmp/project",
       parentSession: "/tmp/project/parent.jsonl",
+    });
+    expect(sessionInfo).toMatchObject({
+      type: "session_info",
+      parentId: null,
+      name: "Implement autocomplete",
     });
   });
 
@@ -51,12 +58,15 @@ describe("session handoff spawn helpers", () => {
       "/tmp/sessions",
       "child-session-123",
       Buffer.from(JSON.stringify(bootstrap), "utf8").toString("base64"),
+      "Implement autocomplete",
     );
 
     expect(resumeCommand).toContain(HANDOFF_BOOTSTRAP_ENV);
     expect(resumeCommand).toContain("child-session-123");
     expect(resumeCommand).toContain("--session-dir");
-    expect(resumeCommand).toContain("--session");
+    expect(resumeCommand).toContain("--session-id");
+    expect(resumeCommand).toContain("--name");
+    expect(resumeCommand).toContain("Implement autocomplete");
   });
 
   it("builds a zsh launch command around the bootstrap-aware resume command", () => {
@@ -64,6 +74,7 @@ describe("session handoff spawn helpers", () => {
       "/tmp/sessions",
       "child-session-123",
       "encoded-bootstrap",
+      "Implement autocomplete",
     );
 
     expect(launchCommand).toContain(HANDOFF_BOOTSTRAP_ENV);
@@ -137,6 +148,7 @@ describe("session handoff spawn helpers", () => {
       direction: "right",
       sessionId: "child-session-123",
       bootstrapValue,
+      title: "Implement autocomplete",
     });
 
     expect(result).toEqual({ success: true });
@@ -155,6 +167,7 @@ describe("session handoff spawn helpers", () => {
     expect(appleScript).toContain(HANDOFF_BOOTSTRAP_ENV);
     expect(appleScript).toContain("child-session-123");
     expect(appleScript).toContain("/tmp/sessions");
+    expect(appleScript).toContain("Implement autocomplete");
   });
 
   it("reports AppleScript launch failures with a macOS Ghostty hint", async () => {
@@ -166,6 +179,7 @@ describe("session handoff spawn helpers", () => {
       direction: "right",
       sessionId: "child-session-123",
       bootstrapValue: "encoded-bootstrap",
+      title: "Implement autocomplete",
     });
 
     expect(result).toEqual({
@@ -186,6 +200,7 @@ describe("session handoff spawn helpers", () => {
       sessionId: "child-session-123",
       goal: "Finish phase 1",
       nextTask: "Implement autocomplete",
+      title: "Implement autocomplete",
       initialPrompt: "Approved handoff draft",
     });
   });
@@ -233,5 +248,6 @@ function createMetadata() {
     "Finish phase 1",
     "Implement autocomplete",
     "Approved handoff draft",
+    "Implement autocomplete",
   );
 }
