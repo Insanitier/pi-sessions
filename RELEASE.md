@@ -1,5 +1,13 @@
 # Release Notes
 
+## v0.3.1
+
+Patch release for Pi 0.78.1 mode handling.
+
+- Guarded TUI-only command panels with Pi's explicit extension mode so RPC, JSON, and print modes do not enter custom TUI flows.
+- Raised Pi peer/dev dependencies to `0.78.1`.
+- Added a repo-local npm release skill for future release workflow guidance.
+
 ## v0.3.0
 
 Configurable auto-title generation prompt and improved handoff session titles.
