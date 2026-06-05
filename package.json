@@ -38,7 +38,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "biome check . && tsc --noEmit && vitest run",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
