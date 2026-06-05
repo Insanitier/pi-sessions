@@ -46,7 +46,6 @@
     "@earendil-works/pi-ai": "^0.78.1",
     "@earendil-works/pi-coding-agent": "^0.78.1",
     "@earendil-works/pi-tui": "^0.78.1",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.3",
@@ -64,7 +63,7 @@
   "lint-staged": {
     "*.{js,cjs,mjs,jsx,ts,tsx,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "better-sqlite3": "^12.9.0"
   }
 }

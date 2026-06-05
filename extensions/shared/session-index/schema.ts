@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
 import { parseTypeBoxValue } from "../typebox.js";
 import {
   INDEX_SCHEMA_VERSION,
@@ -9,6 +8,7 @@ import {
   type SessionIndexDatabase,
   type SessionIndexStatus,
 } from "./common.js";
+import { openSqlite } from "./sqlite.js";
 
 export function ensureIndexDir(dir: string): string {
   if (!existsSync(dir)) {
@@ -29,16 +29,7 @@ export function openIndexDatabase(
   options?: { create?: boolean; timeoutMs?: number },
 ): SessionIndexDatabase {
   const create = options?.create ?? true;
-  const db = new Database(
-    dbPath,
-    options?.timeoutMs === undefined
-      ? { fileMustExist: !create }
-      : { fileMustExist: !create, timeout: options.timeoutMs },
-  );
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("foreign_keys = ON");
-  return db;
+  return openSqlite(dbPath, { create, timeoutMs: options?.timeoutMs });
 }
 
 export function initializeSchema(db: SessionIndexDatabase): void {
@@ -148,7 +139,7 @@ export function setMetadata(db: SessionIndexDatabase, key: string, value: string
 
 export function getMetadata(db: SessionIndexDatabase, key: string): string | undefined {
   const row = db.prepare(`SELECT value FROM metadata WHERE key = ?`).get(key);
-  if (row === undefined) {
+  if (row === undefined || row === null) {
     return undefined;
   }
 

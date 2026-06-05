@@ -113,7 +113,7 @@ export function getSessionById(
     )
     .get(sessionId);
 
-  if (row === undefined) {
+  if (row === undefined || row === null) {
     return undefined;
   }
 
@@ -140,7 +140,7 @@ export function getSessionByPath(
     )
     .get(sessionPath);
 
-  if (row === undefined) {
+  if (row === undefined || row === null) {
     return undefined;
   }
 

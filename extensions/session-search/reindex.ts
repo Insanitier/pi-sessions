@@ -1,4 +1,4 @@
-import { renameSync } from "node:fs";
+import { renameSync, rmSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   createTempIndexPath,
@@ -34,11 +34,16 @@ export async function rebuildSessionIndex(options: ReindexOptions): Promise<Rein
   try {
     initializeSchema(db);
     ({ sessionCount, chunkCount } = indexSessionFiles(db, sessionFiles));
+    // Fold the WAL into the main file so the single-file rename below is
+    // self-contained. bun:sqlite does not checkpoint on close.
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   } finally {
     db.close();
   }
 
   renameSync(tempIndexPath, finalIndexPath);
+  rmSync(`${tempIndexPath}-wal`, { force: true });
+  rmSync(`${tempIndexPath}-shm`, { force: true });
   return { sessionCount, chunkCount, indexPath: finalIndexPath };
 }
 

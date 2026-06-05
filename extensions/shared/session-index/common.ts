@@ -1,7 +1,7 @@
-import type Database from "better-sqlite3";
 import { Type } from "typebox";
 import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-search/normalize.js";
 import { safeParseTypeBoxJson } from "../typebox.js";
+import type { SqliteDatabase } from "./sqlite.js";
 
 export const INDEX_SCHEMA_VERSION = 7;
 
@@ -119,7 +119,7 @@ export interface SessionIndexStatus {
   lastFullReindexAt?: string | undefined;
 }
 
-export type SessionIndexDatabase = Database.Database;
+export type SessionIndexDatabase = SqliteDatabase;
 
 export const NULLABLE_STRING_SCHEMA = Type.Union([Type.String(), Type.Null()]);
 export const SESSION_ORIGIN_SCHEMA = Type.Union([

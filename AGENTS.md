@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Pi extension package providing session search (FTS5), session ask (LLM-powered Q&A), command-driven session handoff, automatic session titling, and session index management. TypeScript, ES modules, SQLite via better-sqlite3.
+Pi extension package providing session search (FTS5), session ask (LLM-powered Q&A), command-driven session handoff, automatic session titling, and session index management. TypeScript, ES modules, SQLite via a runtime adapter (`bun:sqlite` under Bun, `better-sqlite3` under Node).
 
 ## Commands
 
@@ -48,6 +48,7 @@ extensions/                  # All source code
   shared/
     session-index/           # Shared indexed-session backend
       common.ts              # Shared types, schemas, and search helpers
+      sqlite.ts              # Runtime SQLite adapter (bun:sqlite / better-sqlite3)
       schema.ts              # SQLite schema and metadata/status helpers
       store.ts               # Session/text/file-touch writes
       lineage.ts             # Lineage queries and materialization
@@ -184,6 +185,9 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 - Use prepared statements — no string interpolation in queries
 - Wrap multi-step writes in transactions
 - Use `WAL` journal mode for concurrent read access
+- Open databases through `openSqlite` in `sqlite.ts`; it resolves the driver at runtime so Bun never loads the native `better-sqlite3` addon
+- Code against the shared `SessionIndexDatabase` interface, not a driver-specific type
+- `bun:sqlite` does not checkpoint the WAL on `close()`; checkpoint with `PRAGMA wal_checkpoint(TRUNCATE)` before renaming a database file away from its sidecar
 
 ### Comments
 
@@ -212,7 +216,7 @@ Patterns used in this codebase:
 
 ## Dependencies
 
-- **Runtime**: `better-sqlite3` (SQLite driver)
+- **Runtime**: SQLite via `bun:sqlite` (Bun builtin) under the Pi host; `better-sqlite3` (optional dependency) on Node, e.g. for tests
 - **Peer**: `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox` — provided by the Pi host
 - **Dev**: Biome, TypeScript, Vitest, type packages
 
