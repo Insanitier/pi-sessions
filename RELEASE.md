@@ -7,7 +7,7 @@ Configurable auto-title generation prompt and improved handoff session titles.
 - Added `sessions.autoTitle.prompt` so users can customize generated title style.
 - Capped generated auto-titles at 80 characters.
 - Plain `/handoff` now waits for the old transcript to clear before the approved prompt starts.
-- Raised Pi peer/dev dependencies to `0.78.0`.
+- Raised Pi peer/dev dependencies to `0.78.1`.
 
 ## v0.2.2
 

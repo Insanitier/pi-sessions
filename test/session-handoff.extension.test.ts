@@ -68,6 +68,7 @@ describe("session handoff extension", () => {
 
     const pasteToEditor = vi.fn();
     await shortcuts.get("alt+o")?.handler({
+      mode: "tui",
       hasUI: true,
       cwd: "/repo/app",
       ui: { pasteToEditor },
@@ -110,6 +111,7 @@ describe("session handoff extension", () => {
 
     const pasteToEditor = vi.fn();
     await shortcuts.get("alt+o")?.handler({
+      mode: "tui",
       hasUI: true,
       cwd: "/repo/app",
       ui: { pasteToEditor },

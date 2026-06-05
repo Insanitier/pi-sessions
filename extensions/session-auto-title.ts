@@ -25,6 +25,7 @@ import {
   runRetitlePlan,
 } from "./session-auto-title/retitle.js";
 import { showRetitleWizard } from "./session-auto-title/wizard.js";
+import { isTuiMode } from "./shared/pi-mode.js";
 import { loadSettings } from "./shared/settings.js";
 
 export {
@@ -160,7 +161,7 @@ async function handleTitleInvocation(
   };
 
   if (invocation.kind === "open-pane") {
-    if (!ctx.hasUI) {
+    if (!isTuiMode(ctx)) {
       return retitleCurrentSession();
     }
 
@@ -171,7 +172,7 @@ async function handleTitleInvocation(
     return runWithInFlightTracking(state, retitleCurrentSession);
   }
 
-  if (ctx.hasUI && !invocation.force) {
+  if (isTuiMode(ctx) && !invocation.force) {
     return showRetitleWizard(
       pi,
       state.controller,

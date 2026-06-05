@@ -23,6 +23,7 @@ import {
   launchSplitHandoffSession,
   validateSplitHandoffPrerequisites,
 } from "./session-handoff/spawn.js";
+import { isTuiMode } from "./shared/pi-mode.js";
 import { loadSettings } from "./shared/settings.js";
 
 const HANDOFF_USAGE = "Usage: /handoff [--left|--right|--up|--down] <goal for new thread>";
@@ -38,7 +39,7 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   pi.registerCommand("handoff", {
     description: "Transfer context to a new focused session",
     handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
-      if (!ctx.hasUI) {
+      if (!isTuiMode(ctx)) {
         ctx.ui.notify("handoff requires interactive mode", "error");
         return;
       }
@@ -157,7 +158,7 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   pi.registerShortcut(settings.handoff.pickerShortcut, {
     description: "Open the session reference picker",
     handler: async (ctx) => {
-      if (!ctx.hasUI) {
+      if (!isTuiMode(ctx)) {
         return;
       }
 

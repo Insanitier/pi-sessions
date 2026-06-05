@@ -294,6 +294,7 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
   };
 
   const replacementContext = {
+    mode: "tui",
     hasUI: true,
     sendUserMessage: vi.fn(async () => {}),
     ui: {
@@ -303,6 +304,7 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
 
   return {
     cwd: "/tmp/project",
+    mode: "tui",
     hasUI: true,
     model: { provider: "openai", id: "gpt-5.4" },
     ui: {

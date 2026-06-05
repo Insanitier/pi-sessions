@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Focusable, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.js";
+import { isTuiMode } from "./shared/pi-mode.js";
 import { getIndexStatus, type SessionIndexStatus } from "./shared/session-index/index.js";
 import { loadSettings } from "./shared/settings.js";
 
@@ -17,7 +18,7 @@ export default function sessionIndexExtension(pi: ExtensionAPI): void {
   pi.registerCommand("session-index", {
     description: "Open the session index control panel",
     handler: async (_args, ctx) => {
-      if (!ctx.hasUI) {
+      if (!isTuiMode(ctx)) {
         ctx.ui.notify("/session-index requires interactive mode.", "warning");
         return;
       }

@@ -1,5 +1,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { isTuiMode } from "../shared/pi-mode.js";
 
 export const TITLE_USAGE = "Usage: /title [this|folder|pi] [-f]";
 
@@ -51,7 +52,7 @@ export function createSessionAutoTitleCommandHandler(
   ) => Promise<RetitleCommandOutcome>,
 ): (args: string, ctx: ExtensionCommandContext) => Promise<void> {
   return async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
-    const parsed = parseRetitleCommand(args, ctx.hasUI);
+    const parsed = parseRetitleCommand(args, isTuiMode(ctx));
     if (parsed.kind === "error") {
       ctx.ui.notify(parsed.message, "error");
       return;
@@ -76,10 +77,10 @@ export function getRetitleArgumentCompletions(argumentPrefix: string): Autocompl
   return filtered.length > 0 ? filtered : null;
 }
 
-export function parseRetitleCommand(args: string, hasUI: boolean): RetitleCommandParseResult {
+export function parseRetitleCommand(args: string, hasTui: boolean): RetitleCommandParseResult {
   const trimmedArgs = args.trim();
   if (!trimmedArgs) {
-    return hasUI ? { kind: "open-pane" } : { kind: "run", scope: "this" };
+    return hasTui ? { kind: "open-pane" } : { kind: "run", scope: "this" };
   }
 
   const tokens = trimmedArgs.split(/\s+/);

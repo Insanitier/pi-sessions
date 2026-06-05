@@ -120,6 +120,7 @@ describe("session auto-title command", () => {
 
 function createCommandContext(options: { hasUI: boolean }) {
   return {
+    mode: options.hasUI ? "tui" : "print",
     hasUI: options.hasUI,
     waitForIdle: vi.fn(async () => {}),
     ui: {

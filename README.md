@@ -20,6 +20,8 @@
 
 ## Install
 
+Requires Pi `0.78.1` or newer.
+
 **From npm** (recommended):
 
 ```bash
