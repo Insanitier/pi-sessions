@@ -17,6 +17,7 @@ export interface SqliteStatement {
 }
 
 export interface SqliteDatabase {
+  readonly inTransaction: boolean;
   prepare(sql: string): SqliteStatement;
   exec(sql: string): void;
   transaction<Args extends unknown[], Result>(

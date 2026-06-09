@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.3.2
+
+Patch release for Bun-compatible session indexing and handoff reasoning settings.
+
+- Added Bun runtime support for the session index SQLite backend while preserving Node support through `better-sqlite3`.
+- Made rebuilt index files self-contained by checkpointing WAL data before replacing the live index.
+- Handoff draft generation now reuses the active session thinking level when the selected model supports reasoning.
+- Made package installation more tolerant when Husky is unavailable.
+
 ## v0.3.1
 
 Patch release for Pi 0.78.1 mode handling.
