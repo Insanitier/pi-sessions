@@ -6,20 +6,20 @@ import {
   generateHandoffDraft,
 } from "../extensions/session-handoff/extract.js";
 
-const { completeMock } = vi.hoisted(() => ({
-  completeMock: vi.fn(),
+const { completeSimpleMock } = vi.hoisted(() => ({
+  completeSimpleMock: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-ai", async () => {
   const actual = await vi.importActual<object>("@earendil-works/pi-ai");
   return {
     ...actual,
-    complete: completeMock,
+    completeSimple: completeSimpleMock,
   };
 });
 
 afterEach(() => {
-  completeMock.mockReset();
+  completeSimpleMock.mockReset();
 });
 
 describe("session handoff extraction", () => {
@@ -93,7 +93,7 @@ describe("session handoff extraction", () => {
   });
 
   it("builds a draft from a structured tool call", async () => {
-    completeMock.mockResolvedValue({
+    completeSimpleMock.mockResolvedValue({
       role: "assistant",
       api: "openai-responses",
       provider: "openai",
@@ -124,7 +124,11 @@ describe("session handoff extraction", () => {
       ],
     });
 
-    const result = await generateHandoffDraft(createGenerationContext(), "Finish phase 1.");
+    const result = await generateHandoffDraft(
+      createGenerationContext(),
+      "Finish phase 1.",
+      "medium",
+    );
 
     expect(result?.sessionId).toBe("session-123");
     expect(result?.context.title).toBe("Finish handoff phase 1");
@@ -133,14 +137,15 @@ describe("session handoff extraction", () => {
     expect(result?.draft).toContain("## Context\nThe command is partly implemented.");
     expect(result?.draft).toContain("## Open Questions\n- Should the preview use an overlay?");
 
-    const [model, context, options] = completeMock.mock.calls[0] ?? [];
-    expect(model).toEqual({ provider: "openai", id: "gpt-5.4" });
+    const [model, context, options] = completeSimpleMock.mock.calls[0] ?? [];
+    expect(model).toEqual({ provider: "openai", id: "gpt-5.4", reasoning: true });
     expect(context.tools).toHaveLength(1);
-    expect(options).toMatchObject({ apiKey: "test-key", toolChoice: "any" });
+    expect(options).toMatchObject({ apiKey: "test-key", reasoning: "medium" });
+    expect(options).not.toHaveProperty("toolChoice");
   });
 
   it("rejects generated titles longer than 64 characters", async () => {
-    completeMock.mockResolvedValue({
+    completeSimpleMock.mockResolvedValue({
       role: "assistant",
       api: "openai-responses",
       provider: "openai",
@@ -172,12 +177,12 @@ describe("session handoff extraction", () => {
     });
 
     await expect(
-      generateHandoffDraft(createGenerationContext(), "Finish phase 1."),
+      generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
     ).rejects.toThrow("Handoff title must be 64 characters or less.");
   });
 
   it("rejects responses without the structured tool call", async () => {
-    completeMock.mockResolvedValue({
+    completeSimpleMock.mockResolvedValue({
       role: "assistant",
       api: "openai-responses",
       provider: "openai",
@@ -196,7 +201,7 @@ describe("session handoff extraction", () => {
     });
 
     await expect(
-      generateHandoffDraft(createGenerationContext(), "Finish phase 1."),
+      generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
     ).rejects.toThrow("Handoff extraction did not return structured context.");
   });
 
@@ -211,7 +216,7 @@ describe("session handoff extraction", () => {
 
 function createGenerationContext() {
   return {
-    model: { provider: "openai", id: "gpt-5.4" },
+    model: { provider: "openai", id: "gpt-5.4", reasoning: true },
     modelRegistry: {
       async getApiKeyAndHeaders() {
         return { ok: true, apiKey: "test-key", headers: undefined };

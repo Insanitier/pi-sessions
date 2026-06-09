@@ -77,7 +77,8 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         generatedDraft = await runWithLoader(
           ctx,
           "Generating handoff draft...",
-          async (signal: AbortSignal) => generateHandoffDraft(ctx, parsedArgs.goal, signal),
+          async (signal: AbortSignal) =>
+            generateHandoffDraft(ctx, parsedArgs.goal, pi.getThinkingLevel(), signal),
         );
       } catch (error) {
         ctx.ui.notify(formatHandoffError(error), "error");

@@ -1,7 +1,9 @@
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
   type AssistantMessage,
-  complete,
+  completeSimple,
   type Message,
+  type SimpleStreamOptions,
   type TextContent,
   type ThinkingContent,
   type Tool,
@@ -86,6 +88,7 @@ export interface HandoffDraftResult {
 export async function generateHandoffDraft(
   ctx: ExtensionContext,
   goal: string,
+  thinkingLevel: ThinkingLevel | undefined,
   signal?: AbortSignal,
 ): Promise<HandoffDraftResult | undefined> {
   if (!ctx.model) {
@@ -117,25 +120,23 @@ export async function generateHandoffDraft(
     timestamp: Date.now(),
   };
 
-  const response = await complete(
+  const requestOptions: SimpleStreamOptions = {
+    apiKey: auth.apiKey,
+    ...(auth.headers ? { headers: auth.headers } : {}),
+    ...(signal ? { signal } : {}),
+    ...(ctx.model.reasoning && thinkingLevel && thinkingLevel !== "off"
+      ? { reasoning: thinkingLevel }
+      : {}),
+  };
+
+  const response = await completeSimple(
     ctx.model,
     {
       systemPrompt: HANDOFF_SYSTEM_PROMPT,
       messages: [userMessage],
       tools: [HANDOFF_EXTRACTION_TOOL],
     },
-    signal
-      ? {
-          apiKey: auth.apiKey,
-          ...(auth.headers ? { headers: auth.headers } : {}),
-          signal,
-          toolChoice: "any",
-        }
-      : {
-          apiKey: auth.apiKey,
-          ...(auth.headers ? { headers: auth.headers } : {}),
-          toolChoice: "any",
-        },
+    requestOptions,
   );
 
   if (response.stopReason === "aborted") {
