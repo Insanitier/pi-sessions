@@ -23,6 +23,19 @@ afterEach(() => {
 });
 
 describe("session-search db", () => {
+  it("applies a busy timeout to every connection", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    expect(db.prepare("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
+    db.close();
+
+    const customDb = openIndexDatabase(dbPath, { create: false, timeoutMs: 1234 });
+    expect(customDb.prepare("PRAGMA busy_timeout").get()).toEqual({ timeout: 1234 });
+    customDb.close();
+  });
+
   it("creates schema, reports status, and applies repo and file filters without ranking boosts", () => {
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");

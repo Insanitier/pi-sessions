@@ -22,9 +22,6 @@ import {
 import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.js";
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
-const HOOK_INDEX_WRITE_TIMEOUT_MS = 500;
-const HOOK_INDEX_WRITE_MAX_ATTEMPTS = 4;
-const HOOK_INDEX_WRITE_RETRY_DELAYS_MS = [150, 400, 1000];
 
 type TrackedToolName = "read" | "edit" | "write";
 
@@ -99,24 +96,15 @@ export function createSessionHookController(options: { indexPath: string }): Ses
       return syncAttachedSession(indexPath, state, "session_start");
     },
     async handleSessionSwitch(previousSessionFile, sessionFile, cwd, sessionOrigin) {
-      const previousSynced = await syncSessionFile(
-        indexPath,
-        previousSessionFile,
-        "session_switch",
-      );
+      const previousSynced = syncSessionFile(indexPath, previousSessionFile, "session_switch");
       attachSession(state, sessionFile, cwd);
-      const currentSynced = await syncAttachedSession(
-        indexPath,
-        state,
-        "session_switch",
-        sessionOrigin,
-      );
+      const currentSynced = syncAttachedSession(indexPath, state, "session_switch", sessionOrigin);
       return previousSynced || currentSynced;
     },
     async handleSessionFork(previousSessionFile, sessionFile, cwd) {
-      const previousSynced = await syncSessionFile(indexPath, previousSessionFile, "session_fork");
+      const previousSynced = syncSessionFile(indexPath, previousSessionFile, "session_fork");
       attachSession(state, sessionFile, cwd);
-      const currentSynced = await syncAttachedSession(indexPath, state, "session_fork", "fork");
+      const currentSynced = syncAttachedSession(indexPath, state, "session_fork", "fork");
       return previousSynced || currentSynced;
     },
     handleToolCall(event, sessionFile, cwd) {
@@ -144,7 +132,7 @@ export function createSessionHookController(options: { indexPath: string }): Ses
     async handleTurnEnd(sessionFile, cwd) {
       attachSession(state, sessionFile, cwd);
       try {
-        return await syncAttachedSession(indexPath, state, "turn_end");
+        return syncAttachedSession(indexPath, state, "turn_end");
       } finally {
         clearTurnState(state);
       }
@@ -160,7 +148,7 @@ export function createSessionHookController(options: { indexPath: string }): Ses
     async handleSessionShutdown(sessionFile, cwd) {
       attachSession(state, sessionFile, cwd);
       try {
-        return await syncAttachedSession(indexPath, state, "session_shutdown");
+        return syncAttachedSession(indexPath, state, "session_shutdown");
       } finally {
         clearTurnState(state);
         state.currentSessionFile = undefined;
@@ -182,66 +170,22 @@ function attachSession(
   state.currentCwd = cwd;
 }
 
-async function retryIndexWrite<T>(action: () => T): Promise<T> {
-  for (let attempt = 1; attempt <= HOOK_INDEX_WRITE_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      return action();
-    } catch (error) {
-      if (!isRetryableSqliteLock(error) || attempt >= HOOK_INDEX_WRITE_MAX_ATTEMPTS) {
-        throw error;
-      }
-
-      await sleep(getRetryDelayMs(attempt));
-    }
-  }
-
-  return action();
-}
-
-function getRetryDelayMs(attempt: number): number {
-  return (
-    HOOK_INDEX_WRITE_RETRY_DELAYS_MS[attempt - 1] ??
-    HOOK_INDEX_WRITE_RETRY_DELAYS_MS[HOOK_INDEX_WRITE_RETRY_DELAYS_MS.length - 1] ??
-    0
-  );
-}
-
-function isRetryableSqliteLock(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
-  const message = error.message.toLowerCase();
-  return (
-    code === "SQLITE_BUSY" ||
-    code === "SQLITE_LOCKED" ||
-    code?.startsWith("SQLITE_BUSY_") === true ||
-    code?.startsWith("SQLITE_LOCKED_") === true ||
-    message.includes("database is locked")
-  );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function syncAttachedSession(
   indexPath: string,
   state: SessionHookState,
   eventType: string,
   sessionOrigin?: SessionOrigin,
-): Promise<boolean> {
+): boolean {
   return syncSessionFile(indexPath, state.currentSessionFile, eventType, state, sessionOrigin);
 }
 
-async function syncSessionFile(
+function syncSessionFile(
   indexPath: string,
   sessionFile: string | undefined,
   eventType: string,
   state?: SessionHookState,
   sessionOrigin?: SessionOrigin,
-): Promise<boolean> {
+): boolean {
   if (!sessionFile || !existsSync(sessionFile)) {
     return false;
   }
@@ -256,36 +200,36 @@ async function syncSessionFile(
     return false;
   }
 
-  await retryIndexWrite(() => {
-    const db = openIndexDatabase(indexPath, {
-      create: false,
-      timeoutMs: HOOK_INDEX_WRITE_TIMEOUT_MS,
-    });
-    try {
-      db.transaction(() => {
-        const existingSession = getSessionById(db, extracted.sessionId);
-        const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
-        upsertSession(db, sessionRow, "hook");
-        if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
-          rebuildSessionLineageRelations(db);
-        }
-        clearSessionIndexedData(db, extracted.sessionId);
+  const db = openIndexDatabase(indexPath, { create: false });
+  try {
+    // The transaction reads before it writes, so it must be immediate: a
+    // deferred transaction whose snapshot goes stale fails with SQLITE_BUSY
+    // on the read-to-write upgrade without ever invoking the busy handler.
+    // Immediate mode takes the write lock at BEGIN, where busy_timeout queues
+    // us behind concurrent writers from other pi processes.
+    db.transaction(() => {
+      const existingSession = getSessionById(db, extracted.sessionId);
+      const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
+      clearSessionIndexedData(db, extracted.sessionId);
+      upsertSession(db, sessionRow, "hook");
+      if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
+        rebuildSessionLineageRelations(db);
+      }
 
-        for (const chunk of extracted.chunks) {
-          insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
-        }
+      for (const chunk of extracted.chunks) {
+        insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
+      }
 
-        for (const fileTouch of extracted.fileTouches) {
-          insertSessionFileTouch(db, { sessionId: extracted.sessionId, ...fileTouch });
-        }
+      for (const fileTouch of extracted.fileTouches) {
+        insertSessionFileTouch(db, { sessionId: extracted.sessionId, ...fileTouch });
+      }
 
-        setMetadata(db, "hook_updated_at", new Date().toISOString());
-        setMetadata(db, "hook_last_event", eventType);
-      })();
-    } finally {
-      db.close();
-    }
-  });
+      setMetadata(db, "hook_updated_at", new Date().toISOString());
+      setMetadata(db, "hook_last_event", eventType);
+    }).immediate();
+  } finally {
+    db.close();
+  }
 
   if (state) {
     state.lastFlushedSessionFile = sessionFile;

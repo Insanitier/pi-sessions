@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 const requireModule = createRequire(import.meta.url);
 const isBun = Boolean(process.versions.bun);
 
+const DEFAULT_BUSY_TIMEOUT_MS = 5000;
+
 export type SqliteBindValue = string | number | bigint | null;
 
 export interface SqliteRunResult {
@@ -16,13 +18,17 @@ export interface SqliteStatement {
   run(...params: SqliteBindValue[]): SqliteRunResult;
 }
 
+export interface SqliteTransaction<Args extends unknown[], Result> {
+  (...args: Args): Result;
+  immediate(...args: Args): Result;
+}
+
 export interface SqliteDatabase {
-  readonly inTransaction: boolean;
   prepare(sql: string): SqliteStatement;
   exec(sql: string): void;
   transaction<Args extends unknown[], Result>(
     fn: (...args: Args) => Result,
-  ): (...args: Args) => Result;
+  ): SqliteTransaction<Args, Result>;
   close(): void;
 }
 
@@ -47,19 +53,16 @@ export function openSqlite(
   const Database = loadDatabaseConstructor();
   const db = isBun
     ? new Database(dbPath, { create: options.create, readwrite: true })
-    : new Database(
-        dbPath,
-        options.timeoutMs === undefined
-          ? { fileMustExist: !options.create }
-          : { fileMustExist: !options.create, timeout: options.timeoutMs },
-      );
+    : new Database(dbPath, { fileMustExist: !options.create });
 
+  // busy_timeout must be set before any other statement: the journal_mode
+  // pragma below is the connection's first lock acquisition (and may run WAL
+  // recovery), and immediate transactions rely on this timeout to queue behind
+  // concurrent writers instead of failing.
+  db.exec(`PRAGMA busy_timeout = ${options.timeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
   db.exec("PRAGMA foreign_keys = ON");
-  if (isBun && options.timeoutMs !== undefined) {
-    db.exec(`PRAGMA busy_timeout = ${options.timeoutMs}`);
-  }
 
   return db;
 }

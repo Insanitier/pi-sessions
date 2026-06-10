@@ -1,4 +1,6 @@
+import { createRequire } from "node:module";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSessionHookController } from "../extensions/session-search/hooks.js";
 import {
@@ -480,7 +482,7 @@ describe("session-search hooks", () => {
     expect(lastHookEvent).toBe("session_compact");
   });
 
-  it("retries locked hook writes", async () => {
+  it("queues behind a long-held concurrent write lock instead of failing", async () => {
     const root = testFs.createTempDir();
     const indexPath = path.join(root, "index.sqlite");
     const cwd = "/repo/app";
@@ -490,36 +492,34 @@ describe("session-search hooks", () => {
     setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
     db.close();
 
-    const sessionPath = testFs.writeJsonlFile(root, "locked-retry.jsonl", [
+    const sessionPath = testFs.writeJsonlFile(root, "locked-wait.jsonl", [
       {
         type: "session",
-        id: "locked-retry",
+        id: "locked-wait",
         timestamp: "2026-03-22T00:00:00.000Z",
         cwd,
       },
     ]);
 
     const controller = createSessionHookController({ indexPath });
-    const lockDb = openIndexDatabase(indexPath, { create: false });
-    lockDb.exec("BEGIN IMMEDIATE");
-    const releaseLock = setTimeout(() => {
-      if (lockDb.inTransaction) {
-        lockDb.exec("COMMIT");
-      }
-    }, 550);
+    // The lock holder lives on a worker thread because the sqlite driver blocks
+    // the main thread synchronously while it waits for the lock. The hold must
+    // outlast any bounded retry scheme so only genuine lock queueing passes.
+    const lockHolder = await holdWriteLockInWorker(indexPath, 4200);
 
     try {
       expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
     } finally {
-      clearTimeout(releaseLock);
-      if (lockDb.inTransaction) {
-        lockDb.exec("ROLLBACK");
-      }
-      lockDb.close();
+      await lockHolder.released;
     }
-  });
 
-  it("throws locked hook write failures after retries are exhausted", async () => {
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const lastHookEvent = getMetadata(indexedDb, "hook_last_event");
+    indexedDb.close();
+    expect(lastHookEvent).toBe("turn_end");
+  }, 15_000);
+
+  it("keeps the session-id search chunk after a hook sync", async () => {
     const root = testFs.createTempDir();
     const indexPath = path.join(root, "index.sqlite");
     const cwd = "/repo/app";
@@ -529,28 +529,65 @@ describe("session-search hooks", () => {
     setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
     db.close();
 
-    const sessionPath = testFs.writeJsonlFile(root, "locked-failure.jsonl", [
+    const sessionPath = testFs.writeJsonlFile(root, "id-chunk.jsonl", [
       {
         type: "session",
-        id: "locked-failure",
+        id: "0196fb52-f615-7321-a3b6-9e0e1a90d4c2",
         timestamp: "2026-03-22T00:00:00.000Z",
         cwd,
       },
     ]);
 
     const controller = createSessionHookController({ indexPath });
-    const lockDb = openIndexDatabase(indexPath, { create: false });
-    lockDb.exec("BEGIN IMMEDIATE");
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
 
-    try {
-      await expect(controller.handleTurnEnd(sessionPath, cwd)).rejects.toThrow(
-        "database is locked",
-      );
-    } finally {
-      if (lockDb.inTransaction) {
-        lockDb.exec("ROLLBACK");
-      }
-      lockDb.close();
-    }
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const idChunks = indexedDb
+      .prepare(
+        `SELECT COUNT(*) as count FROM session_text_chunks WHERE session_id = ? AND source_kind = 'session_id'`,
+      )
+      .get("0196fb52-f615-7321-a3b6-9e0e1a90d4c2") as { count: number };
+    indexedDb.close();
+
+    expect(idChunks.count).toBe(1);
   });
 });
+
+const WRITE_LOCK_HOLDER_SCRIPT = `
+const { parentPort, workerData } = require("node:worker_threads");
+const Database = require(workerData.driverPath);
+const db = new Database(workerData.dbPath);
+db.exec("PRAGMA busy_timeout = 0");
+db.exec("BEGIN IMMEDIATE");
+db.prepare(
+  "INSERT INTO metadata(key, value) VALUES ('lock-holder', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+).run();
+parentPort.postMessage("locked");
+setTimeout(() => {
+  db.exec("COMMIT");
+  db.close();
+}, workerData.holdMs);
+`;
+
+async function holdWriteLockInWorker(
+  dbPath: string,
+  holdMs: number,
+): Promise<{ released: Promise<void> }> {
+  const driverPath = createRequire(import.meta.url).resolve("better-sqlite3");
+  const worker = new Worker(WRITE_LOCK_HOLDER_SCRIPT, {
+    eval: true,
+    workerData: { dbPath, driverPath, holdMs },
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    worker.once("message", () => resolve());
+    worker.once("error", reject);
+  });
+
+  return {
+    released: new Promise<void>((resolve, reject) => {
+      worker.once("exit", () => resolve());
+      worker.once("error", reject);
+    }),
+  };
+}

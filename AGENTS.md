@@ -183,11 +183,11 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 ### SQLite Patterns
 
 - Use prepared statements — no string interpolation in queries
-- Wrap multi-step writes in transactions
+- Wrap multi-step writes in transactions and run them with `db.transaction(fn).immediate()` — a deferred read-then-write transaction fails with `SQLITE_BUSY` on the snapshot upgrade, and `busy_timeout` cannot wait that out
 - Use `WAL` journal mode for concurrent read access
-- Open databases through `openSqlite` in `sqlite.ts`; it resolves the driver at runtime so Bun never loads the native `better-sqlite3` addon
+- Open databases through `openSqlite` in `sqlite.ts`; it resolves the driver at runtime so Bun never loads the native `better-sqlite3` addon, and it sets `busy_timeout` on every connection before any other statement
 - Code against the shared `SessionIndexDatabase` interface, not a driver-specific type
-- `bun:sqlite` does not checkpoint the WAL on `close()`; checkpoint with `PRAGMA wal_checkpoint(TRUNCATE)` before renaming a database file away from its sidecar
+- Never rename or swap a database file other processes may have open — the stranded connections keep writing to the old inode and the old `-wal` sidecar ends up next to the new file, which SQLite treats as undefined behavior. Rebuild content in place instead.
 
 ### Comments
 

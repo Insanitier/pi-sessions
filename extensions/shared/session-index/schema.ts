@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
 import { parseTypeBoxValue } from "../typebox.js";
 import {
   INDEX_SCHEMA_VERSION,
@@ -15,13 +14,6 @@ export function ensureIndexDir(dir: string): string {
     mkdirSync(dir, { recursive: true });
   }
   return dir;
-}
-
-export function createTempIndexPath(finalPath: string): string {
-  const dir = path.dirname(finalPath);
-  const baseName = path.basename(finalPath, path.extname(finalPath));
-  ensureIndexDir(dir);
-  return path.join(dir, `${baseName}.tmp-${process.pid}-${Date.now()}.sqlite`);
 }
 
 export function openIndexDatabase(

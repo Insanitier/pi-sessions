@@ -3,7 +3,12 @@ import path from "node:path";
 import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { rebuildSessionIndex } from "../extensions/session-search/reindex.js";
-import { openIndexDatabase, searchSessions } from "../extensions/shared/session-index/index.js";
+import {
+  initializeSchema,
+  openIndexDatabase,
+  searchSessions,
+  upsertSession,
+} from "../extensions/shared/session-index/index.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-reindex-");
@@ -199,5 +204,68 @@ describe("rebuildSessionIndex", () => {
       handoffGoal: "Finish the split",
       handoffNextTask: "Implement autocomplete",
     });
+  });
+
+  it("rebuilds in place so connections opened before the rebuild see the new data", async () => {
+    const root = testFs.createTempDir();
+    const sessionsDir = path.join(root, "sessions");
+    const nestedDir = path.join(sessionsDir, "--repo--");
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const seedDb = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(seedDb);
+    upsertSession(
+      seedDb,
+      {
+        sessionId: "stale-session",
+        sessionPath: "/tmp/deleted-session.jsonl",
+        sessionName: "Deleted session",
+        cwd,
+        repoRoots: [],
+        startedAt: "2026-03-21T00:00:00.000Z",
+        modifiedAt: "2026-03-21T00:00:00.000Z",
+        messageCount: 0,
+        entryCount: 1,
+      },
+      "hook",
+    );
+    seedDb.close();
+
+    // Simulates another pi process holding a connection while the rebuild runs.
+    // Replacing the database file out from under it would strand it on the old
+    // inode and leave the old WAL sidecar next to the new file.
+    const observer = openIndexDatabase(indexPath, { create: false });
+
+    const sessionPath = testFs.writeJsonlFile(nestedDir, "2026-03-22T00-00-00-000Z_live.jsonl", [
+      {
+        type: "session",
+        id: "live-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+
+    vi.spyOn(SessionManager, "listAll").mockResolvedValue([
+      {
+        path: sessionPath,
+        id: "live-session",
+        cwd,
+        created: new Date("2026-03-22T00:00:00.000Z"),
+        modified: new Date("2026-03-22T00:00:00.000Z"),
+        messageCount: 0,
+        firstMessage: "",
+        allMessagesText: "",
+      } satisfies SessionInfo,
+    ]);
+
+    await rebuildSessionIndex({ indexPath });
+
+    const observedIds = observer
+      .prepare(`SELECT session_id as sessionId FROM sessions ORDER BY session_id`)
+      .all() as Array<{ sessionId: string }>;
+    observer.close();
+
+    expect(observedIds).toEqual([{ sessionId: "live-session" }]);
   });
 });

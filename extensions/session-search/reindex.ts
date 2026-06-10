@@ -1,17 +1,18 @@
-import { renameSync, rmSync } from "node:fs";
+import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
-  createTempIndexPath,
+  clearSessionIndexedData,
+  ensureIndexDir,
   initializeSchema,
-  insertSession,
   insertSessionFileTouch,
   insertTextChunk,
   openIndexDatabase,
   rebuildSessionLineageRelations,
   type SessionIndexDatabase,
   setMetadata,
+  upsertSession,
 } from "../shared/session-index/index.js";
-import { extractSessionRecord, type SearchTextChunk, type SessionFileTouch } from "./extract.js";
+import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.js";
 
 export interface ReindexOptions {
   indexPath: string;
@@ -24,75 +25,67 @@ export interface ReindexResult {
 }
 
 export async function rebuildSessionIndex(options: ReindexOptions): Promise<ReindexResult> {
-  const finalIndexPath = options.indexPath;
-  const tempIndexPath = createTempIndexPath(finalIndexPath);
+  const indexPath = options.indexPath;
+  ensureIndexDir(path.dirname(indexPath));
   const sessionFiles = (await SessionManager.listAll()).map((session) => session.path);
 
-  const db = openIndexDatabase(tempIndexPath, { create: true });
-  let sessionCount: number;
-  let chunkCount: number;
+  const db = openIndexDatabase(indexPath, { create: true });
   try {
-    initializeSchema(db);
-    ({ sessionCount, chunkCount } = indexSessionFiles(db, sessionFiles));
-    // Fold the WAL into the main file so the single-file rename below is
-    // self-contained. bun:sqlite does not checkpoint on close.
-    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  } finally {
-    db.close();
-  }
+    db.transaction(() => {
+      dropIndexTables(db);
+      initializeSchema(db);
+    }).immediate();
 
-  renameSync(tempIndexPath, finalIndexPath);
-  rmSync(`${tempIndexPath}-wal`, { force: true });
-  rmSync(`${tempIndexPath}-shm`, { force: true });
-  return { sessionCount, chunkCount, indexPath: finalIndexPath };
-}
-
-function indexSessionFiles(
-  db: SessionIndexDatabase,
-  sessionFiles: string[],
-): { sessionCount: number; chunkCount: number } {
-  return db.transaction((files: string[]) => {
     let sessionCount = 0;
     let chunkCount = 0;
-
-    for (const sessionFile of files) {
+    for (const sessionFile of sessionFiles) {
       const extracted = extractSessionRecord(sessionFile);
       if (!extracted) {
         continue;
       }
 
-      insertSession(db, extracted, "full_reindex");
+      db.transaction(() => indexSession(db, extracted)).immediate();
       sessionCount += 1;
-      chunkCount += insertSessionChunks(db, extracted.sessionId, extracted.chunks);
-      insertSessionFileTouches(db, extracted.sessionId, extracted.fileTouches);
+      chunkCount += extracted.chunks.length;
     }
 
-    rebuildSessionLineageRelations(db);
-    setMetadata(db, "indexed_at", new Date().toISOString());
-    setMetadata(db, "session_source", "SessionManager.listAll()");
+    db.transaction(() => {
+      rebuildSessionLineageRelations(db);
+      setMetadata(db, "indexed_at", new Date().toISOString());
+      setMetadata(db, "session_source", "SessionManager.listAll()");
+    }).immediate();
 
-    return { sessionCount, chunkCount };
-  })(sessionFiles);
+    return { sessionCount, chunkCount, indexPath };
+  } finally {
+    db.close();
+  }
 }
 
-function insertSessionChunks(
-  db: SessionIndexDatabase,
-  sessionId: string,
-  chunks: SearchTextChunk[],
-): number {
-  for (const chunk of chunks) {
-    insertTextChunk(db, { sessionId, ...chunk });
+function dropIndexTables(db: SessionIndexDatabase): void {
+  // Children before parents: foreign_keys is ON and DROP TABLE runs an
+  // implicit DELETE that parent-side constraints would reject.
+  db.exec(`
+    DROP TABLE IF EXISTS session_lineage_relations;
+    DROP TABLE IF EXISTS session_text_chunks;
+    DROP TABLE IF EXISTS session_file_touches;
+    DROP TABLE IF EXISTS session_text_chunks_fts;
+    DROP TABLE IF EXISTS sessions;
+    DROP TABLE IF EXISTS metadata;
+  `);
+}
+
+function indexSession(db: SessionIndexDatabase, extracted: ExtractedSessionRecord): void {
+  clearSessionIndexedData(db, extracted.sessionId);
+  upsertSession(db, extracted, "full_reindex");
+
+  for (const chunk of extracted.chunks) {
+    insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
   }
 
-  return chunks.length;
-}
-
-function insertSessionFileTouches(
-  db: SessionIndexDatabase,
-  sessionId: string,
-  fileTouches: SessionFileTouch[],
-): void {
-  for (const fileTouch of fileTouches) {
-    insertSessionFileTouch(db, { sessionId, ...fileTouch });
+  for (const fileTouch of extracted.fileTouches) {
+    insertSessionFileTouch(db, {
+      sessionId: extracted.sessionId,
+      ...fileTouch,
+    });
   }
 }
