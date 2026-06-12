@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, type Stats, statSync } from "node:fs";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
   isToolCallEventType,
@@ -6,20 +6,32 @@ import {
   type ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
+  clearSessionChunksBySourceKind,
   clearSessionIndexedData,
-  getIndexStatus,
+  getMetadata,
   getSessionById,
+  getSessionRowByPath,
   INDEX_SCHEMA_VERSION,
   insertSessionFileTouch,
   insertTextChunk,
   openIndexDatabase,
-  rebuildSessionLineageRelations,
+  refreshSessionLineageRelationsFor,
+  type SessionIndexDatabase,
   type SessionLineageRow,
   type SessionOrigin,
+  type SessionRow,
   setMetadata,
   upsertSession,
 } from "../shared/session-index/index.js";
-import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.js";
+import {
+  createSessionNameChunk,
+  type ExtractedSessionRecord,
+  type ExtractedSessionTail,
+  extractSessionRecord,
+  extractSessionTail,
+  type SessionFileTouch,
+} from "./extract.js";
+import { deriveSessionRepoRoots } from "./normalize.js";
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
 
@@ -186,13 +198,51 @@ function syncSessionFile(
   state?: SessionHookState,
   sessionOrigin?: SessionOrigin,
 ): boolean {
-  if (!sessionFile || !existsSync(sessionFile)) {
+  if (!sessionFile || !existsSync(sessionFile) || !existsSync(indexPath)) {
     return false;
   }
 
-  const status = getIndexStatus(indexPath);
-  if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-    return false;
+  const db = openIndexDatabase(indexPath, { create: false });
+  try {
+    if (readIndexSchemaVersion(db) !== INDEX_SCHEMA_VERSION) {
+      return false;
+    }
+
+    const synced = syncSessionFileWithDb(db, sessionFile, eventType, sessionOrigin);
+    if (synced && state) {
+      state.lastFlushedSessionFile = sessionFile;
+    }
+    return synced;
+  } finally {
+    db.close();
+  }
+}
+
+interface TailSyncBaseline extends SessionRow {
+  indexedFileSize: number;
+  indexedFileMtimeMs: number;
+  indexedFileAnchor: string;
+}
+
+function syncSessionFileWithDb(
+  db: SessionIndexDatabase,
+  sessionFile: string,
+  eventType: string,
+  sessionOrigin?: SessionOrigin,
+): boolean {
+  const baseline = asTailSyncBaseline(getSessionRowByPath(db, sessionFile));
+  const stat = statSync(sessionFile);
+
+  if (baseline && isIndexCurrent(baseline, stat, sessionOrigin)) {
+    db.transaction(() => writeHookSyncMetadata(db, eventType)).immediate();
+    return true;
+  }
+
+  if (baseline && stat.size > baseline.indexedFileSize) {
+    const tail = extractSessionTail(sessionFile, baseline);
+    if (tail && applyTailSync(db, baseline, tail, eventType, sessionOrigin)) {
+      return true;
+    }
   }
 
   const extracted = extractSessionRecord(sessionFile);
@@ -200,42 +250,198 @@ function syncSessionFile(
     return false;
   }
 
-  const db = openIndexDatabase(indexPath, { create: false });
-  try {
-    // The transaction reads before it writes, so it must be immediate: a
-    // deferred transaction whose snapshot goes stale fails with SQLITE_BUSY
-    // on the read-to-write upgrade without ever invoking the busy handler.
-    // Immediate mode takes the write lock at BEGIN, where busy_timeout queues
-    // us behind concurrent writers from other pi processes.
-    db.transaction(() => {
-      const existingSession = getSessionById(db, extracted.sessionId);
-      const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
-      clearSessionIndexedData(db, extracted.sessionId);
-      upsertSession(db, sessionRow, "hook");
-      if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
-        rebuildSessionLineageRelations(db);
-      }
-
-      for (const chunk of extracted.chunks) {
-        insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
-      }
-
-      for (const fileTouch of extracted.fileTouches) {
-        insertSessionFileTouch(db, { sessionId: extracted.sessionId, ...fileTouch });
-      }
-
-      setMetadata(db, "hook_updated_at", new Date().toISOString());
-      setMetadata(db, "hook_last_event", eventType);
-    }).immediate();
-  } finally {
-    db.close();
-  }
-
-  if (state) {
-    state.lastFlushedSessionFile = sessionFile;
-  }
-
+  applyFullSync(db, extracted, eventType, sessionOrigin);
   return true;
+}
+
+function asTailSyncBaseline(row: SessionRow | undefined): TailSyncBaseline | undefined {
+  if (
+    !row ||
+    row.indexedFileSize === undefined ||
+    row.indexedFileMtimeMs === undefined ||
+    row.indexedFileAnchor === undefined ||
+    row.indexedFileAnchor.length === 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...row,
+    indexedFileSize: row.indexedFileSize,
+    indexedFileMtimeMs: row.indexedFileMtimeMs,
+    indexedFileAnchor: row.indexedFileAnchor,
+  };
+}
+
+function isIndexCurrent(
+  baseline: TailSyncBaseline,
+  stat: Stats,
+  sessionOrigin?: SessionOrigin,
+): boolean {
+  return (
+    stat.size === baseline.indexedFileSize &&
+    Math.trunc(stat.mtimeMs) === baseline.indexedFileMtimeMs &&
+    (sessionOrigin === undefined || sessionOrigin === baseline.sessionOrigin)
+  );
+}
+
+// All write transactions are immediate: they read before they write, and a
+// deferred transaction whose snapshot goes stale fails with SQLITE_BUSY on the
+// read-to-write upgrade without ever invoking the busy handler. Immediate mode
+// takes the write lock at BEGIN, where busy_timeout queues us behind concurrent
+// writers from other pi processes.
+function applyFullSync(
+  db: SessionIndexDatabase,
+  extracted: ExtractedSessionRecord,
+  eventType: string,
+  sessionOrigin?: SessionOrigin,
+): void {
+  db.transaction(() => {
+    const existingSession = getSessionById(db, extracted.sessionId);
+    const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
+    clearSessionIndexedData(db, extracted.sessionId);
+    upsertSession(db, sessionRow, "hook");
+    if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
+      refreshSessionLineageRelationsFor(db, [
+        extracted.sessionId,
+        existingSession?.parentSessionId,
+        sessionRow.parentSessionId,
+      ]);
+    }
+
+    for (const chunk of extracted.chunks) {
+      insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
+    }
+
+    for (const fileTouch of extracted.fileTouches) {
+      insertSessionFileTouch(db, { sessionId: extracted.sessionId, ...fileTouch });
+    }
+
+    writeHookSyncMetadata(db, eventType);
+  }).immediate();
+}
+
+function applyTailSync(
+  db: SessionIndexDatabase,
+  baseline: TailSyncBaseline,
+  tail: ExtractedSessionTail,
+  eventType: string,
+  sessionOrigin?: SessionOrigin,
+): boolean {
+  return db
+    .transaction((): boolean => {
+      // Another process may have advanced the index between our baseline read
+      // and this transaction; the tail deltas would then double-count.
+      const current = getSessionRowByPath(db, baseline.sessionPath);
+      if (
+        !current ||
+        current.sessionId !== baseline.sessionId ||
+        current.indexedFileSize !== baseline.indexedFileSize
+      ) {
+        return false;
+      }
+
+      const scan = tail.scan;
+      upsertSession(db, buildTailSessionRow(baseline, tail, sessionOrigin), "hook");
+
+      if (scan.sessionName !== undefined && scan.sessionName !== baseline.sessionName) {
+        clearSessionChunksBySourceKind(db, baseline.sessionId, "session_name");
+        if (scan.sessionName) {
+          insertTextChunk(db, {
+            sessionId: baseline.sessionId,
+            ...createSessionNameChunk(scan.sessionName, baseline.startedAt),
+          });
+        }
+      }
+
+      if (!baseline.handoffGoal && scan.handoffMetadata) {
+        const { entryId, ts, metadata } = scan.handoffMetadata;
+        insertTextChunk(db, {
+          sessionId: baseline.sessionId,
+          entryId,
+          entryType: "custom",
+          ts,
+          sourceKind: "handoff_goal",
+          text: metadata.goal,
+        });
+        insertTextChunk(db, {
+          sessionId: baseline.sessionId,
+          entryId,
+          entryType: "custom",
+          ts,
+          sourceKind: "handoff_next_task",
+          text: metadata.nextTask,
+        });
+      }
+
+      for (const chunk of scan.chunks) {
+        insertTextChunk(db, { sessionId: baseline.sessionId, ...chunk });
+      }
+
+      for (const fileTouch of scan.fileTouches) {
+        insertSessionFileTouch(db, { sessionId: baseline.sessionId, ...fileTouch });
+      }
+
+      writeHookSyncMetadata(db, eventType);
+      return true;
+    })
+    .immediate();
+}
+
+function buildTailSessionRow(
+  baseline: TailSyncBaseline,
+  tail: ExtractedSessionTail,
+  sessionOrigin?: SessionOrigin,
+): SessionRow {
+  const scan = tail.scan;
+  const tailHandoffMetadata = baseline.handoffGoal ? undefined : scan.handoffMetadata?.metadata;
+  const tailOrigin =
+    baseline.parentSessionPath && tailHandoffMetadata?.origin === "handoff"
+      ? ("handoff" as const)
+      : undefined;
+  const nextOrigin = resolveSessionOrigin(sessionOrigin, tailOrigin, baseline.sessionOrigin);
+
+  return {
+    sessionId: baseline.sessionId,
+    sessionPath: baseline.sessionPath,
+    sessionName: scan.sessionName ?? baseline.sessionName,
+    firstUserPrompt: baseline.firstUserPrompt || (scan.firstUserPrompt ?? ""),
+    cwd: baseline.cwd,
+    repoRoots: mergeRepoRoots(baseline, scan.fileTouches),
+    startedAt: baseline.startedAt,
+    modifiedAt:
+      scan.maxEntryTs !== undefined && scan.maxEntryTs > baseline.modifiedAt
+        ? scan.maxEntryTs
+        : baseline.modifiedAt,
+    messageCount: baseline.messageCount + scan.messageCount,
+    entryCount: baseline.entryCount + scan.entryCount,
+    parentSessionPath: baseline.parentSessionPath,
+    parentSessionId: baseline.parentSessionId,
+    sessionOrigin: baseline.parentSessionPath ? (nextOrigin ?? "unknown_child") : undefined,
+    handoffGoal: baseline.handoffGoal ?? tailHandoffMetadata?.goal,
+    handoffNextTask: baseline.handoffNextTask ?? tailHandoffMetadata?.nextTask,
+    indexedFileSize: tail.indexedFileSize,
+    indexedFileMtimeMs: tail.indexedFileMtimeMs,
+    indexedFileAnchor: tail.indexedFileAnchor,
+  };
+}
+
+function mergeRepoRoots(baseline: TailSyncBaseline, fileTouches: SessionFileTouch[]): string[] {
+  const merged = new Set([
+    ...baseline.repoRoots,
+    ...deriveSessionRepoRoots(baseline.cwd, fileTouches),
+  ]);
+  return [...merged].sort();
+}
+
+function writeHookSyncMetadata(db: SessionIndexDatabase, eventType: string): void {
+  setMetadata(db, "hook_updated_at", new Date().toISOString());
+  setMetadata(db, "hook_last_event", eventType);
+}
+
+function readIndexSchemaVersion(db: SessionIndexDatabase): number | undefined {
+  const raw = getMetadata(db, "schema_version");
+  return raw === undefined ? undefined : Number(raw);
 }
 
 function mergeSessionLineage(

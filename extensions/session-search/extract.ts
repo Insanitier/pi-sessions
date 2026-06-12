@@ -1,4 +1,13 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -34,7 +43,7 @@ export interface SearchTextChunk {
   text: string;
 }
 
-interface DurableHandoffMetadataRecord {
+export interface DurableHandoffMetadataRecord {
   entryId?: string | undefined;
   ts: string;
   metadata: HandoffSessionMetadata;
@@ -70,8 +79,37 @@ export interface ExtractedSessionRecord {
   sessionOrigin?: SessionOrigin | undefined;
   handoffGoal?: string | undefined;
   handoffNextTask?: string | undefined;
+  indexedFileSize: number;
+  indexedFileMtimeMs: number;
+  indexedFileAnchor: string;
   chunks: SearchTextChunk[];
   fileTouches: SessionFileTouch[];
+}
+
+export interface SessionEntryScan {
+  chunks: SearchTextChunk[];
+  fileTouches: SessionFileTouch[];
+  messageCount: number;
+  entryCount: number;
+  maxEntryTs?: string | undefined;
+  firstUserPrompt?: string | undefined;
+  sessionName?: string | undefined;
+  handoffMetadata?: DurableHandoffMetadataRecord | undefined;
+}
+
+export interface SessionTailBaseline {
+  sessionId: string;
+  cwd: string;
+  startedAt: string;
+  indexedFileSize: number;
+  indexedFileAnchor: string;
+}
+
+export interface ExtractedSessionTail {
+  scan: SessionEntryScan;
+  indexedFileSize: number;
+  indexedFileMtimeMs: number;
+  indexedFileAnchor: string;
 }
 
 export interface ParsedSessionFile {
@@ -82,6 +120,8 @@ export interface ParsedSessionFile {
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
 const BASH_OUTPUT_TEXT_LIMIT = 500;
+const FILE_ANCHOR_BYTES = 64;
+const NEWLINE_BYTE = 0x0a;
 const SUMMARY_DETAILS_SCHEMA = Type.Object({
   readFiles: Type.Optional(Type.Array(Type.String())),
   modifiedFiles: Type.Optional(Type.Array(Type.String())),
@@ -115,30 +155,124 @@ export function listSessionFiles(sessionsDir: string): string[] {
 }
 
 export function extractSessionRecord(sessionPath: string): ExtractedSessionRecord | undefined {
-  const parsed = parseSessionFile(sessionPath);
+  const indexedFileMtimeMs = Math.trunc(statSync(sessionPath).mtimeMs);
+  const buffer = readFileSync(sessionPath);
+  const slice = sliceCompleteJsonlPrefix(buffer);
+  const parsed = parseSessionContent(slice.content);
   if (!parsed) return undefined;
 
   const fallbackTs = parsed.header.timestamp;
-  const chunks: SearchTextChunk[] = [];
-  const fileTouches: SessionFileTouch[] = [];
-  let modifiedAt = fallbackTs;
-  let messageCount = 0;
-  let firstUserPrompt: string | undefined;
-  let durableHandoffMetadata: DurableHandoffMetadataRecord | undefined;
+  const scan = scanSessionEntries(parsed.entries, fallbackTs, parsed.header.cwd);
 
+  const chunks: SearchTextChunk[] = [];
   if (parsed.sessionName) {
-    chunks.push({
-      entryType: "session_info",
-      ts: parsed.header.timestamp,
-      sourceKind: "session_name",
-      text: parsed.sessionName,
-    });
+    chunks.push(createSessionNameChunk(parsed.sessionName, fallbackTs));
+  }
+  chunks.push(...scan.chunks);
+  appendDurableHandoffMetadataChunks(chunks, scan.handoffMetadata);
+
+  const parentSessionPath = normalizeParentSessionPath(parsed.header.parentSession);
+
+  return {
+    sessionId: parsed.header.id,
+    sessionPath,
+    sessionName: parsed.sessionName,
+    firstUserPrompt: trimmedText(scan.firstUserPrompt),
+    cwd: parsed.header.cwd,
+    repoRoots: deriveSessionRepoRoots(parsed.header.cwd, scan.fileTouches),
+    startedAt: fallbackTs,
+    modifiedAt: maxTimestamp(fallbackTs, scan.maxEntryTs),
+    messageCount: scan.messageCount,
+    entryCount: scan.entryCount,
+    parentSessionPath,
+    parentSessionId: parentSessionPath ? readSessionIdFromPath(parentSessionPath) : undefined,
+    sessionOrigin: inferSessionOrigin(parentSessionPath, scan.handoffMetadata?.metadata),
+    handoffGoal: scan.handoffMetadata?.metadata.goal,
+    handoffNextTask: scan.handoffMetadata?.metadata.nextTask,
+    indexedFileSize: slice.consumedBytes,
+    indexedFileMtimeMs,
+    indexedFileAnchor: buildFileAnchor(buffer, slice.consumedBytes),
+    chunks: chunks,
+    fileTouches: scan.fileTouches,
+  };
+}
+
+// Reads only the bytes appended since the last sync. The stored anchor (the
+// final bytes of the previously indexed prefix) proves the prefix is unchanged;
+// any in-place rewrite invalidates it and the caller falls back to a full
+// re-extract. Session files are append-only in normal pi operation.
+export function extractSessionTail(
+  sessionPath: string,
+  baseline: SessionTailBaseline,
+): ExtractedSessionTail | undefined {
+  const anchorBytes = Buffer.from(baseline.indexedFileAnchor, "base64");
+  const anchorStart = baseline.indexedFileSize - anchorBytes.length;
+  if (anchorBytes.length === 0 || anchorStart < 0) {
+    return undefined;
   }
 
-  for (const entry of parsed.entries) {
+  const indexedFileMtimeMs = Math.trunc(statSync(sessionPath).mtimeMs);
+  const fd = openSync(sessionPath, "r");
+  try {
+    const fileSize = fstatSync(fd).size;
+    if (fileSize < baseline.indexedFileSize) {
+      return undefined;
+    }
+
+    const window = Buffer.alloc(fileSize - anchorStart);
+    const bytesRead = readSync(fd, window, 0, window.length, anchorStart);
+    if (
+      bytesRead < anchorBytes.length ||
+      !window.subarray(0, anchorBytes.length).equals(anchorBytes)
+    ) {
+      return undefined;
+    }
+
+    const tailBuffer = window.subarray(anchorBytes.length, bytesRead);
+    const slice = sliceCompleteJsonlPrefix(tailBuffer);
+    const entries = parseSessionEntries(slice.content).filter(isSessionEntry);
+    const consumedWindow = Buffer.concat([
+      anchorBytes,
+      tailBuffer.subarray(0, slice.consumedBytes),
+    ]);
+
+    return {
+      scan: scanSessionEntries(entries, baseline.startedAt, baseline.cwd),
+      indexedFileSize: baseline.indexedFileSize + slice.consumedBytes,
+      indexedFileMtimeMs,
+      indexedFileAnchor: buildFileAnchor(consumedWindow, consumedWindow.length),
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function createSessionNameChunk(sessionName: string, ts: string): SearchTextChunk {
+  return {
+    entryType: "session_info",
+    ts,
+    sourceKind: "session_name",
+    text: sessionName,
+  };
+}
+
+export function scanSessionEntries(
+  entries: SessionEntry[],
+  fallbackTs: string,
+  cwd: string,
+): SessionEntryScan {
+  const chunks: SearchTextChunk[] = [];
+  const fileTouches: SessionFileTouch[] = [];
+  let messageCount = 0;
+  let maxEntryTs: string | undefined;
+  let firstUserPrompt: string | undefined;
+  let sessionName: string | undefined;
+  let handoffMetadata: DurableHandoffMetadataRecord | undefined;
+
+  for (const entry of entries) {
     const entryTs = getEntryTimestamp(entry, fallbackTs);
-    if (entryTs > modifiedAt) {
-      modifiedAt = entryTs;
+    if (maxEntryTs === undefined || entryTs > maxEntryTs) {
+      maxEntryTs = entryTs;
     }
 
     switch (entry.type) {
@@ -150,15 +284,19 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
           firstUserPrompt = contentToText(message.content);
         }
         chunks.push(...extractMessageChunks(entry.id, entryTs, message));
-        fileTouches.push(
-          ...extractMessageFileTouches(entry.id, entryTs, message, parsed.header.cwd),
-        );
+        fileTouches.push(...extractMessageFileTouches(entry.id, entryTs, message, cwd));
+        continue;
+      }
+      case "session_info": {
+        if (typeof entry.name === "string") {
+          sessionName = entry.name.trim();
+        }
         continue;
       }
       case "custom": {
         const nextHandoffMetadata = extractHandoffMetadata(entry, entryTs);
-        if (nextHandoffMetadata && !durableHandoffMetadata) {
-          durableHandoffMetadata = nextHandoffMetadata;
+        if (nextHandoffMetadata && !handoffMetadata) {
+          handoffMetadata = nextHandoffMetadata;
         }
         continue;
       }
@@ -179,7 +317,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
             entryTs,
             "branch_summary_details",
             entry.details,
-            parsed.header.cwd,
+            cwd,
           ),
         );
         continue;
@@ -193,13 +331,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
           trimmedText(entry.summary),
         );
         fileTouches.push(
-          ...extractDetailFileTouches(
-            entry.id,
-            entryTs,
-            "compaction_details",
-            entry.details,
-            parsed.header.cwd,
-          ),
+          ...extractDetailFileTouches(entry.id, entryTs, "compaction_details", entry.details, cwd),
         );
         continue;
       }
@@ -208,33 +340,69 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
     }
   }
 
-  appendDurableHandoffMetadataChunks(chunks, durableHandoffMetadata);
-
-  const parentSessionPath = normalizeParentSessionPath(parsed.header.parentSession);
-
   return {
-    sessionId: parsed.header.id,
-    sessionPath,
-    sessionName: parsed.sessionName,
-    firstUserPrompt: trimmedText(firstUserPrompt),
-    cwd: parsed.header.cwd,
-    repoRoots: deriveSessionRepoRoots(parsed.header.cwd, fileTouches),
-    startedAt: parsed.header.timestamp,
-    modifiedAt,
-    messageCount,
-    entryCount: parsed.entries.length,
-    parentSessionPath,
-    parentSessionId: parentSessionPath ? readSessionIdFromPath(parentSessionPath) : undefined,
-    sessionOrigin: inferSessionOrigin(parentSessionPath, durableHandoffMetadata?.metadata),
-    handoffGoal: durableHandoffMetadata?.metadata.goal,
-    handoffNextTask: durableHandoffMetadata?.metadata.nextTask,
     chunks,
     fileTouches,
+    messageCount,
+    entryCount: entries.length,
+    maxEntryTs,
+    firstUserPrompt,
+    sessionName,
+    handoffMetadata,
   };
 }
 
+function maxTimestamp(fallbackTs: string, entryTs: string | undefined): string {
+  return entryTs !== undefined && entryTs > fallbackTs ? entryTs : fallbackTs;
+}
+
+// Consumes only whole JSONL lines so the recorded byte offset always lands on
+// an entry boundary. A final unterminated line is consumed only if it parses as
+// complete JSON: a strict prefix of a JSON object can never parse, so a torn
+// in-progress write is reliably excluded.
+function sliceCompleteJsonlPrefix(buffer: Buffer): { content: string; consumedBytes: number } {
+  if (buffer.length === 0) {
+    return { content: "", consumedBytes: 0 };
+  }
+
+  if (buffer[buffer.length - 1] === NEWLINE_BYTE) {
+    return { content: buffer.toString("utf8"), consumedBytes: buffer.length };
+  }
+
+  const lastNewline = buffer.lastIndexOf(NEWLINE_BYTE);
+  const finalLine = buffer.subarray(lastNewline + 1).toString("utf8");
+  if (isCompleteJsonLine(finalLine)) {
+    return { content: buffer.toString("utf8"), consumedBytes: buffer.length };
+  }
+
+  const consumedBytes = lastNewline + 1;
+  return { content: buffer.subarray(0, consumedBytes).toString("utf8"), consumedBytes };
+}
+
+function isCompleteJsonLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildFileAnchor(buffer: Buffer, end: number): string {
+  const start = Math.max(0, end - FILE_ANCHOR_BYTES);
+  return buffer.subarray(start, end).toString("base64");
+}
+
 export function parseSessionFile(sessionPath: string): ParsedSessionFile | undefined {
-  const raw = readFileSync(sessionPath, "utf8");
+  return parseSessionContent(readFileSync(sessionPath, "utf8"));
+}
+
+export function parseSessionContent(raw: string): ParsedSessionFile | undefined {
   const fileEntries = parseSessionEntries(raw);
   if (fileEntries.length === 0) {
     return undefined;

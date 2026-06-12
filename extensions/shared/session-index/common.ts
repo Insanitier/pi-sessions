@@ -3,7 +3,7 @@ import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-sear
 import { safeParseTypeBoxJson } from "../typebox.js";
 import type { SqliteDatabase } from "./sqlite.js";
 
-export const INDEX_SCHEMA_VERSION = 7;
+export const INDEX_SCHEMA_VERSION = 8;
 
 export type SessionOrigin = "handoff" | "fork" | "unknown_child";
 export type SessionLineageRelation =
@@ -30,6 +30,9 @@ export interface SessionRow {
   sessionOrigin?: SessionOrigin | undefined;
   handoffGoal?: string | undefined;
   handoffNextTask?: string | undefined;
+  indexedFileSize?: number | undefined;
+  indexedFileMtimeMs?: number | undefined;
+  indexedFileAnchor?: string | undefined;
 }
 
 export interface SessionLineageRow {

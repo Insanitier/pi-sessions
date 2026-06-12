@@ -185,9 +185,39 @@ export function getSiblingSessions(
   return queryRelatedSessions(db, sessionId, ["sibling"]);
 }
 
+interface SessionGraph {
+  nodes: Map<string, SessionGraphNode>;
+  childrenByParent: Map<string, string[]>;
+}
+
 export function rebuildSessionLineageRelations(db: SessionIndexDatabase): void {
   db.prepare(`DELETE FROM session_lineage_relations`).run();
 
+  const graph = buildSessionGraph(db);
+  insertLineageRelationRows(db, graph.nodes.keys(), graph);
+}
+
+// Recomputes lineage for just the connected component(s) containing the seed
+// sessions. Lineage relations only ever link sessions connected through parent
+// edges, so the rest of the table is untouched.
+export function refreshSessionLineageRelationsFor(
+  db: SessionIndexDatabase,
+  seedSessionIds: Array<string | undefined>,
+): void {
+  const graph = buildSessionGraph(db);
+  const component = collectLineageComponent(seedSessionIds, graph);
+  if (component.size === 0) {
+    return;
+  }
+
+  const placeholders = [...component].map(() => "?").join(", ");
+  db.prepare(`DELETE FROM session_lineage_relations WHERE session_id IN (${placeholders})`).run(
+    ...component,
+  );
+  insertLineageRelationRows(db, component, graph);
+}
+
+function buildSessionGraph(db: SessionIndexDatabase): SessionGraph {
   const rows = parseTypeBoxRows(
     SESSION_GRAPH_ROW_SCHEMA,
     db
@@ -229,6 +259,40 @@ export function rebuildSessionLineageRelations(db: SessionIndexDatabase): void {
     childrenByParent.set(node.resolvedParentSessionId, children);
   }
 
+  return { nodes, childrenByParent };
+}
+
+function collectLineageComponent(
+  seedSessionIds: Array<string | undefined>,
+  graph: SessionGraph,
+): Set<string> {
+  const component = new Set<string>();
+  const queue = seedSessionIds.filter(
+    (sessionId): sessionId is string => sessionId !== undefined && graph.nodes.has(sessionId),
+  );
+
+  while (queue.length > 0) {
+    const sessionId = queue.pop();
+    if (!sessionId || component.has(sessionId)) {
+      continue;
+    }
+
+    component.add(sessionId);
+    const parentId = graph.nodes.get(sessionId)?.resolvedParentSessionId;
+    if (parentId) {
+      queue.push(parentId);
+    }
+    queue.push(...(graph.childrenByParent.get(sessionId) ?? []));
+  }
+
+  return component;
+}
+
+function insertLineageRelationRows(
+  db: SessionIndexDatabase,
+  sessionIds: Iterable<string>,
+  graph: SessionGraph,
+): void {
   const insertRelation = db.prepare(
     `
       INSERT INTO session_lineage_relations(session_id, related_session_id, relation, distance)
@@ -236,8 +300,12 @@ export function rebuildSessionLineageRelations(db: SessionIndexDatabase): void {
     `,
   );
 
-  for (const node of nodes.values()) {
-    const relations = collectMaterializedLineageRows(node.sessionId, nodes, childrenByParent);
+  for (const sessionId of sessionIds) {
+    const relations = collectMaterializedLineageRows(
+      sessionId,
+      graph.nodes,
+      graph.childrenByParent,
+    );
     for (const relation of relations.values()) {
       insertRelation.run(
         relation.sessionId,

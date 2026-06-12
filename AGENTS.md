@@ -188,6 +188,7 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 - Open databases through `openSqlite` in `sqlite.ts`; it resolves the driver at runtime so Bun never loads the native `better-sqlite3` addon, and it sets `busy_timeout` on every connection before any other statement
 - Code against the shared `SessionIndexDatabase` interface, not a driver-specific type
 - Never rename or swap a database file other processes may have open — the stranded connections keep writing to the old inode and the old `-wal` sidecar ends up next to the new file, which SQLite treats as undefined behavior. Rebuild content in place instead.
+- `session_text_chunks_fts` is an external-content FTS5 table maintained by triggers on `session_text_chunks` — write to the content table only, never to the FTS table directly
 
 ### Comments
 

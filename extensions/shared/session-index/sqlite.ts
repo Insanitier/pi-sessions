@@ -64,5 +64,35 @@ export function openSqlite(
   db.exec("PRAGMA synchronous = NORMAL");
   db.exec("PRAGMA foreign_keys = ON");
 
-  return db;
+  return withStatementCache(db);
+}
+
+// Neither driver memoizes prepare(), and the write paths prepare the same
+// statements once per row. SQLite re-prepares cached statements transparently
+// when the schema changes, so reusing them across DDL is safe.
+function withStatementCache(db: SqliteDatabase): SqliteDatabase {
+  const statements = new Map<string, SqliteStatement>();
+
+  return {
+    prepare(sql) {
+      const cached = statements.get(sql);
+      if (cached) {
+        return cached;
+      }
+
+      const statement = db.prepare(sql);
+      statements.set(sql, statement);
+      return statement;
+    },
+    exec(sql) {
+      db.exec(sql);
+    },
+    transaction(fn) {
+      return db.transaction(fn);
+    },
+    close() {
+      statements.clear();
+      db.close();
+    },
+  };
 }

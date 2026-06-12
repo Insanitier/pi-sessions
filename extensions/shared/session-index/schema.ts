@@ -47,6 +47,9 @@ export function initializeSchema(db: SessionIndexDatabase): void {
       session_origin TEXT,
       handoff_goal TEXT,
       handoff_next_task TEXT,
+      indexed_file_size INTEGER,
+      indexed_file_mtime_ms INTEGER,
+      indexed_file_anchor TEXT,
       index_version INTEGER NOT NULL,
       indexed_at_ts TEXT NOT NULL,
       index_source TEXT NOT NULL
@@ -89,10 +92,28 @@ export function initializeSchema(db: SessionIndexDatabase): void {
     CREATE INDEX IF NOT EXISTS session_text_chunks_ts_idx ON session_text_chunks(ts DESC);
 
     CREATE VIRTUAL TABLE IF NOT EXISTS session_text_chunks_fts USING fts5(
-      chunk_id UNINDEXED,
-      session_id UNINDEXED,
-      text
+      text,
+      content='session_text_chunks',
+      content_rowid='id'
     );
+
+    CREATE TRIGGER IF NOT EXISTS session_text_chunks_fts_ai
+    AFTER INSERT ON session_text_chunks BEGIN
+      INSERT INTO session_text_chunks_fts(rowid, text) VALUES (new.id, new.text);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS session_text_chunks_fts_ad
+    AFTER DELETE ON session_text_chunks BEGIN
+      INSERT INTO session_text_chunks_fts(session_text_chunks_fts, rowid, text)
+      VALUES ('delete', old.id, old.text);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS session_text_chunks_fts_au
+    AFTER UPDATE ON session_text_chunks BEGIN
+      INSERT INTO session_text_chunks_fts(session_text_chunks_fts, rowid, text)
+      VALUES ('delete', old.id, old.text);
+      INSERT INTO session_text_chunks_fts(rowid, text) VALUES (new.id, new.text);
+    END;
 
     CREATE TABLE IF NOT EXISTS session_file_touches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

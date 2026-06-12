@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
@@ -518,6 +519,333 @@ describe("session-search hooks", () => {
     indexedDb.close();
     expect(lastHookEvent).toBe("turn_end");
   }, 15_000);
+
+  it("indexes appended entries incrementally without rewriting existing chunks", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const sessionPath = testFs.writeJsonlFile(root, "incremental.jsonl", [
+      {
+        type: "session",
+        id: "incremental-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "message",
+        id: "user-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "first turn prompt" }],
+        },
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+
+    // Sentinel: an incremental sync must not touch previously indexed chunks,
+    // while a full re-extract would replace this text with the file contents.
+    const sentinelDb = openIndexDatabase(indexPath, { create: false });
+    sentinelDb
+      .prepare(`UPDATE session_text_chunks SET text = ? WHERE source_kind = 'user_text'`)
+      .run("sentinel-incremental-marker");
+    sentinelDb.close();
+
+    appendFileSync(
+      sessionPath,
+      `${JSON.stringify({
+        type: "message",
+        id: "assistant-1",
+        parentId: "user-1",
+        timestamp: "2026-03-22T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "freshly appended assistant reply" }],
+        },
+      })}\n`,
+    );
+
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const sentinelCount = indexedDb
+      .prepare(`SELECT COUNT(*) as count FROM session_text_chunks WHERE text = ?`)
+      .get("sentinel-incremental-marker") as { count: number };
+    const appendedHits = searchSessions(indexedDb, {
+      query: "freshly appended assistant",
+      limit: 10,
+    });
+    const sessionStats = indexedDb
+      .prepare(
+        `SELECT message_count as messageCount, entry_count as entryCount FROM sessions WHERE session_id = ?`,
+      )
+      .get("incremental-session") as { messageCount: number; entryCount: number };
+    indexedDb.close();
+
+    expect(sentinelCount.count).toBe(1);
+    expect(appendedHits.map((result) => result.sessionId)).toContain("incremental-session");
+    expect(sessionStats).toEqual({ messageCount: 2, entryCount: 2 });
+  });
+
+  it("skips the session write entirely when the file is unchanged", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const sessionPath = testFs.writeJsonlFile(root, "skip.jsonl", [
+      {
+        type: "session",
+        id: "skip-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+
+    // Any sync path that writes the session row resets index_source to "hook".
+    const sentinelDb = openIndexDatabase(indexPath, { create: false });
+    sentinelDb
+      .prepare(`UPDATE sessions SET index_source = 'sentinel' WHERE session_id = ?`)
+      .run("skip-session");
+    sentinelDb.close();
+
+    expect(await controller.handleSessionTree(sessionPath, cwd)).toBe(true);
+
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const row = indexedDb
+      .prepare(`SELECT index_source as indexSource FROM sessions WHERE session_id = ?`)
+      .get("skip-session") as { indexSource: string };
+    const lastHookEvent = getMetadata(indexedDb, "hook_last_event");
+    indexedDb.close();
+
+    expect(row.indexSource).toBe("sentinel");
+    expect(lastHookEvent).toBe("session_tree");
+  });
+
+  it("falls back to a full re-extract when the file is rewritten in place", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const sessionPath = testFs.writeJsonlFile(root, "rewrite.jsonl", [
+      {
+        type: "session",
+        id: "rewrite-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "message",
+        id: "user-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "original prompt text" }],
+        },
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+
+    const sentinelDb = openIndexDatabase(indexPath, { create: false });
+    sentinelDb
+      .prepare(`UPDATE session_text_chunks SET text = ? WHERE source_kind = 'user_text'`)
+      .run("sentinel-rewrite-marker");
+    sentinelDb.close();
+
+    testFs.writeJsonlFile(root, "rewrite.jsonl", [
+      {
+        type: "session",
+        id: "rewrite-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "message",
+        id: "user-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "completely rewritten prompt body" }],
+        },
+      },
+      {
+        type: "message",
+        id: "user-2",
+        parentId: "user-1",
+        timestamp: "2026-03-22T00:00:02.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "second rewritten message" }],
+        },
+      },
+    ]);
+
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const sentinelCount = indexedDb
+      .prepare(`SELECT COUNT(*) as count FROM session_text_chunks WHERE text = ?`)
+      .get("sentinel-rewrite-marker") as { count: number };
+    const rewrittenHits = searchSessions(indexedDb, {
+      query: "completely rewritten prompt",
+      limit: 10,
+    });
+    const sessionStats = indexedDb
+      .prepare(`SELECT message_count as messageCount FROM sessions WHERE session_id = ?`)
+      .get("rewrite-session") as { messageCount: number };
+    indexedDb.close();
+
+    expect(sentinelCount.count).toBe(0);
+    expect(rewrittenHits.map((result) => result.sessionId)).toContain("rewrite-session");
+    expect(sessionStats.messageCount).toBe(2);
+  });
+
+  it("replaces the session-name chunk when a rename is appended", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const sessionPath = testFs.writeJsonlFile(root, "rename.jsonl", [
+      {
+        type: "session",
+        id: "rename-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "session_info",
+        id: "info-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        name: "Original name",
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+
+    appendFileSync(
+      sessionPath,
+      `${JSON.stringify({
+        type: "session_info",
+        id: "info-2",
+        parentId: "info-1",
+        timestamp: "2026-03-22T00:00:02.000Z",
+        name: "Renamed by auto-title",
+      })}\n`,
+    );
+
+    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const nameChunks = indexedDb
+      .prepare(
+        `SELECT text FROM session_text_chunks WHERE session_id = ? AND source_kind = 'session_name'`,
+      )
+      .all("rename-session") as Array<{ text: string }>;
+    const sessionName = indexedDb
+      .prepare(`SELECT session_name as name FROM sessions WHERE session_id = ?`)
+      .get("rename-session") as { name: string };
+    indexedDb.close();
+
+    expect(nameChunks).toEqual([{ text: "Renamed by auto-title" }]);
+    expect(sessionName.name).toBe("Renamed by auto-title");
+  });
+
+  it("refreshes lineage for the affected family only", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const writeSession = (name: string, id: string, parentSession?: string) =>
+      testFs.writeJsonlFile(root, name, [
+        {
+          type: "session",
+          id,
+          timestamp: "2026-03-22T00:00:00.000Z",
+          cwd,
+          ...(parentSession ? { parentSession } : {}),
+        },
+      ]);
+
+    const famAParent = writeSession("fam-a-parent.jsonl", "fam-a-parent");
+    const famAChild = writeSession("fam-a-child.jsonl", "fam-a-child", famAParent);
+    const famBParent = writeSession("fam-b-parent.jsonl", "fam-b-parent");
+    const famBChild = writeSession("fam-b-child.jsonl", "fam-b-child", famBParent);
+
+    const controller = createSessionHookController({ indexPath });
+    for (const sessionPath of [famAParent, famAChild, famBParent, famBChild]) {
+      expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    }
+
+    const beforeDb = openIndexDatabase(indexPath, { create: false });
+    const famBRowids = beforeDb
+      .prepare(
+        `SELECT rowid FROM session_lineage_relations WHERE session_id IN ('fam-b-parent', 'fam-b-child') ORDER BY rowid`,
+      )
+      .all() as Array<{ rowid: number }>;
+    beforeDb.close();
+    expect(famBRowids.length).toBeGreaterThan(0);
+
+    const famAGrandchild = writeSession("fam-a-grandchild.jsonl", "fam-a-grandchild", famAChild);
+    expect(await controller.handleTurnEnd(famAGrandchild, cwd)).toBe(true);
+
+    const afterDb = openIndexDatabase(indexPath, { create: false });
+    // A scoped refresh leaves family B's rows physically untouched; a global
+    // rebuild reinserts them under new rowids.
+    const famBRowidsAfter = afterDb
+      .prepare(
+        `SELECT rowid FROM session_lineage_relations WHERE session_id IN ('fam-b-parent', 'fam-b-child') ORDER BY rowid`,
+      )
+      .all() as Array<{ rowid: number }>;
+    const grandchildRelations = afterDb
+      .prepare(
+        `SELECT related_session_id as relatedId, relation FROM session_lineage_relations WHERE session_id = 'fam-a-grandchild' ORDER BY related_session_id`,
+      )
+      .all() as Array<{ relatedId: string; relation: string }>;
+    afterDb.close();
+
+    expect(famBRowidsAfter).toEqual(famBRowids);
+    expect(grandchildRelations).toEqual([
+      { relatedId: "fam-a-child", relation: "parent" },
+      { relatedId: "fam-a-parent", relation: "ancestor" },
+    ]);
+  });
 
   it("keeps the session-id search chunk after a hook sync", async () => {
     const root = testFs.createTempDir();

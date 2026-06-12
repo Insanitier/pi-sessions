@@ -391,8 +391,10 @@ describe("session-search db", () => {
       .prepare(`SELECT COUNT(*) as count FROM session_file_touches WHERE session_id = ?`)
       .get("session-1") as { count: number };
     const ftsCount = db
-      .prepare(`SELECT COUNT(*) as count FROM session_text_chunks_fts WHERE session_id = ?`)
-      .get("session-1") as { count: number };
+      .prepare(
+        `SELECT COUNT(*) as count FROM session_text_chunks_fts WHERE session_text_chunks_fts MATCH 'before OR session'`,
+      )
+      .get() as { count: number };
     const schemaVersion = getMetadata(db, "schema_version");
     db.close();
 

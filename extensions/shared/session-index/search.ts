@@ -325,12 +325,12 @@ function getTextMatchRows(db: SessionIndexDatabase, filters: SearchFilters): Sea
           s.session_origin as sessionOrigin,
           s.handoff_goal as handoffGoal,
           s.handoff_next_task as handoffNextTask,
-          snippet(session_text_chunks_fts, 2, ?, ?, ?, 12) as snippet,
+          snippet(session_text_chunks_fts, 0, ?, ?, ?, 12) as snippet,
           bm25(session_text_chunks_fts) as rank,
           c.entry_id as entryId,
           c.source_kind as sourceKind
         FROM session_text_chunks_fts
-        JOIN session_text_chunks c ON c.id = CAST(session_text_chunks_fts.chunk_id AS INTEGER)
+        JOIN session_text_chunks c ON c.id = session_text_chunks_fts.rowid
         JOIN sessions s ON s.session_id = c.session_id
         WHERE session_text_chunks_fts MATCH ?
           AND (? IS NULL OR s.modified_ts >= ?)
