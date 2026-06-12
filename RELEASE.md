@@ -1,5 +1,11 @@
 # Release Notes
 
+## v0.4.1
+
+Richer handoff draft extraction.
+
+- `/handoff` now uses a read-only Pi extraction agent so generated handoff prompts can include relevant file context from the workspace.
+
 ## v0.4.0
 
 Session index reliability and incremental hook indexing.
