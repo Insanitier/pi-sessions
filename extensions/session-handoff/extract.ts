@@ -1,18 +1,21 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import {
-  type AssistantMessage,
-  completeSimple,
-  type Message,
-  type SimpleStreamOptions,
-  type TextContent,
-  type ThinkingContent,
-  type Tool,
-  type ToolCall,
+import type {
+  Api,
+  AssistantMessage,
+  Model,
+  TextContent,
+  ThinkingContent,
+  ToolCall,
 } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   buildSessionContext,
   convertToLlm,
+  createAgentSession,
+  DefaultResourceLoader,
+  defineTool,
+  getAgentDir,
+  SessionManager,
   serializeConversation,
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
@@ -56,12 +59,7 @@ const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
   ),
 });
 
-const HANDOFF_EXTRACTION_TOOL: Tool<typeof HANDOFF_EXTRACTION_PARAMETERS> = {
-  name: "create_handoff_context",
-  description: "Extract the structured handoff context for the next session.",
-  parameters: HANDOFF_EXTRACTION_PARAMETERS,
-};
-
+type HandoffExtractionArgs = Static<typeof HANDOFF_EXTRACTION_PARAMETERS>;
 type RequiredHandoffExtractionArgs = Static<typeof REQUIRED_HANDOFF_EXTRACTION_PARAMETERS>;
 
 const REQUIRED_HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
@@ -95,11 +93,7 @@ export async function generateHandoffDraft(
     throw new Error("No model is available for handoff.");
   }
 
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-  if (!auth.ok || !auth.apiKey) {
-    throw new Error(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`);
-  }
-
+  const model = ctx.model;
   const sessionContext = buildSessionContext(
     ctx.sessionManager.getEntries(),
     ctx.sessionManager.getLeafId(),
@@ -109,50 +103,17 @@ export async function generateHandoffDraft(
   }
 
   const conversationText = serializeConversation(convertToLlm(sessionContext.messages));
-  const userMessage: Message = {
-    role: "user",
-    content: [
-      {
-        type: "text",
-        text: buildExtractionPrompt(conversationText, goal),
-      },
-    ],
-    timestamp: Date.now(),
-  };
-
-  const requestOptions: SimpleStreamOptions = {
-    apiKey: auth.apiKey,
-    ...(auth.headers ? { headers: auth.headers } : {}),
-    ...(signal ? { signal } : {}),
-    ...(ctx.model.reasoning && thinkingLevel && thinkingLevel !== "off"
-      ? { reasoning: thinkingLevel }
-      : {}),
-  };
-
-  const response = await completeSimple(
-    ctx.model,
-    {
-      systemPrompt: HANDOFF_SYSTEM_PROMPT,
-      messages: [userMessage],
-      tools: [HANDOFF_EXTRACTION_TOOL],
-    },
-    requestOptions,
+  const handoffContext = await runHandoffExtractionAgent(
+    ctx,
+    model,
+    conversationText,
+    goal,
+    thinkingLevel,
+    signal,
   );
-
-  if (response.stopReason === "aborted") {
+  if (!handoffContext) {
     return undefined;
   }
-
-  if (response.stopReason === "error") {
-    throw new Error(response.errorMessage ?? "Handoff generation failed.");
-  }
-
-  const extraction = extractHandoffContext(response, goal);
-  if (!extraction.context) {
-    throw new Error(extraction.error);
-  }
-
-  const handoffContext = extraction.context;
 
   const sessionId = ctx.sessionManager.getSessionId();
   const sessionPath = ctx.sessionManager.getSessionFile();
@@ -175,6 +136,84 @@ export function buildExtractionPrompt(conversationText: string, goal: string): s
     "",
     "Call create_handoff_context exactly once.",
   ].join("\n");
+}
+
+async function runHandoffExtractionAgent(
+  ctx: ExtensionContext,
+  model: Model<Api>,
+  conversationText: string,
+  goal: string,
+  thinkingLevel: ThinkingLevel | undefined,
+  signal?: AbortSignal,
+): Promise<HandoffContext | undefined> {
+  let capturedArguments: HandoffExtractionArgs | undefined;
+  const createHandoffContextTool = defineTool({
+    name: "create_handoff_context",
+    label: "Create handoff context",
+    description: "Extract the structured handoff context for the next session.",
+    parameters: HANDOFF_EXTRACTION_PARAMETERS,
+    execute: async (_toolCallId, params) => {
+      capturedArguments = params;
+      return {
+        content: [{ type: "text", text: "Handoff context captured. Stopping." }],
+        details: {},
+        terminate: true,
+      };
+    },
+  });
+
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: ctx.cwd,
+    agentDir: getAgentDir(),
+    noExtensions: true,
+    noPromptTemplates: true,
+    noSkills: true,
+    appendSystemPromptOverride: (base) => [...base, HANDOFF_SYSTEM_PROMPT],
+  });
+  await resourceLoader.reload();
+
+  const { session } = await createAgentSession({
+    cwd: ctx.cwd,
+    model,
+    modelRegistry: ctx.modelRegistry,
+    ...(thinkingLevel ? { thinkingLevel } : {}),
+    tools: ["read", "grep", "find", "ls", "create_handoff_context"],
+    customTools: [createHandoffContextTool],
+    resourceLoader,
+    sessionManager: SessionManager.inMemory(ctx.cwd),
+  });
+
+  const abortHandler = (): void => {
+    void session.abort();
+  };
+
+  try {
+    signal?.addEventListener("abort", abortHandler, { once: true });
+    if (signal?.aborted) {
+      await session.abort();
+      return undefined;
+    }
+
+    await session.prompt(buildExtractionPrompt(conversationText, goal));
+  } finally {
+    signal?.removeEventListener("abort", abortHandler);
+    session.dispose();
+  }
+
+  if (signal?.aborted) {
+    return undefined;
+  }
+
+  if (!capturedArguments) {
+    throw new Error("Handoff extraction did not return structured context.");
+  }
+
+  const extraction = extractHandoffContextFromArguments(capturedArguments, goal);
+  if (!extraction.context) {
+    throw new Error(extraction.error);
+  }
+
+  return extraction.context;
 }
 
 export function assembleHandoffDraft(
@@ -224,11 +263,18 @@ export function extractHandoffContext(
     return { error: "Handoff extraction did not return structured context." };
   }
 
+  return extractHandoffContextFromArguments(toolCall.arguments, goal);
+}
+
+function extractHandoffContextFromArguments(
+  argumentsValue: unknown,
+  goal: string,
+): { context: HandoffContext; error?: undefined } | { context?: undefined; error: string } {
   let requiredArguments: RequiredHandoffExtractionArgs;
   try {
     requiredArguments = parseTypeBoxValue(
       REQUIRED_HANDOFF_EXTRACTION_PARAMETERS,
-      toolCall.arguments,
+      argumentsValue,
       "Invalid create_handoff_context arguments",
     );
   } catch {
@@ -241,9 +287,9 @@ export function extractHandoffContext(
   }
 
   const summary = normalizeText(requiredArguments.summary);
-  const relevantFiles = normalizeStringArray(toolCall.arguments.relevantFiles, MAX_RELEVANT_FILES);
+  const relevantFiles = getRelevantFiles(argumentsValue);
   const nextTask = normalizeText(requiredArguments.nextTask) || goal.trim();
-  const openQuestions = normalizeStringArray(toolCall.arguments.openQuestions, MAX_OPEN_QUESTIONS);
+  const openQuestions = getOpenQuestions(argumentsValue);
 
   if (!summary || !nextTask || !title) {
     return { error: "Handoff extraction did not return structured context." };
@@ -285,8 +331,28 @@ function normalizeStringArray(value: unknown, limit: number): string[] {
   return [...uniqueValues];
 }
 
+function getRelevantFiles(argumentsValue: unknown): string[] {
+  if (!isRecord(argumentsValue)) {
+    return [];
+  }
+
+  return normalizeStringArray(argumentsValue.relevantFiles, MAX_RELEVANT_FILES);
+}
+
+function getOpenQuestions(argumentsValue: unknown): string[] {
+  if (!isRecord(argumentsValue)) {
+    return [];
+  }
+
+  return normalizeStringArray(argumentsValue.openQuestions, MAX_OPEN_QUESTIONS);
+}
+
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function isCreateHandoffContextToolCall(

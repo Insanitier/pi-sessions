@@ -6,20 +6,20 @@ import {
   generateHandoffDraft,
 } from "../extensions/session-handoff/extract.js";
 
-const { completeSimpleMock } = vi.hoisted(() => ({
-  completeSimpleMock: vi.fn(),
+const { createAgentSessionMock } = vi.hoisted(() => ({
+  createAgentSessionMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", async () => {
-  const actual = await vi.importActual<object>("@earendil-works/pi-ai");
+vi.mock("@earendil-works/pi-coding-agent", async () => {
+  const actual = await vi.importActual<object>("@earendil-works/pi-coding-agent");
   return {
     ...actual,
-    completeSimple: completeSimpleMock,
+    createAgentSession: createAgentSessionMock,
   };
 });
 
 afterEach(() => {
-  completeSimpleMock.mockReset();
+  createAgentSessionMock.mockReset();
 });
 
 describe("session handoff extraction", () => {
@@ -92,37 +92,16 @@ describe("session handoff extraction", () => {
     });
   });
 
-  it("builds a draft from a structured tool call", async () => {
-    completeSimpleMock.mockResolvedValue({
-      role: "assistant",
-      api: "openai-responses",
-      provider: "openai",
-      model: "gpt-5.4",
-      usage: {
-        input: 1,
-        output: 1,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 2,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: "toolUse",
-      timestamp: Date.now(),
-      content: [
-        {
-          type: "toolCall",
-          id: "call-1",
-          name: "create_handoff_context",
-          arguments: {
-            title: "Finish handoff phase 1",
-            summary: "The command is partly implemented.",
-            relevantFiles: ["extensions/session-handoff.ts"],
-            nextTask: "Finish phase 1 and verify it.",
-            openQuestions: ["Should the preview use an overlay?"],
-          },
-        },
-      ],
-    });
+  it("builds a draft from the deep extraction agent", async () => {
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession({
+        title: "Finish handoff phase 1",
+        summary: "The command is partly implemented.",
+        relevantFiles: ["extensions/session-handoff.ts"],
+        nextTask: "Finish phase 1 and verify it.",
+        openQuestions: ["Should the preview use an overlay?"],
+      }),
+    );
 
     const result = await generateHandoffDraft(
       createGenerationContext(),
@@ -137,68 +116,51 @@ describe("session handoff extraction", () => {
     expect(result?.draft).toContain("## Context\nThe command is partly implemented.");
     expect(result?.draft).toContain("## Open Questions\n- Should the preview use an overlay?");
 
-    const [model, context, options] = completeSimpleMock.mock.calls[0] ?? [];
-    expect(model).toEqual({ provider: "openai", id: "gpt-5.4", reasoning: true });
-    expect(context.tools).toHaveLength(1);
-    expect(options).toMatchObject({ apiKey: "test-key", reasoning: "medium" });
-    expect(options).not.toHaveProperty("toolChoice");
+    const [options] = createAgentSessionMock.mock.calls[0] ?? [];
+    expect(options).toMatchObject({
+      cwd: "/tmp/project",
+      model: { provider: "openai", id: "gpt-5.4", reasoning: true },
+      thinkingLevel: "medium",
+      tools: ["read", "grep", "find", "ls", "create_handoff_context"],
+    });
+    expect(options.customTools).toHaveLength(1);
+  });
+
+  it("passes the serialized conversation and goal to the deep extraction agent", async () => {
+    let prompt = "";
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession(undefined, (value) => {
+        prompt = value;
+      }),
+    );
+
+    await expect(
+      generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
+    ).rejects.toThrow("Handoff extraction did not return structured context.");
+
+    expect(prompt).toContain("## Conversation\n[User]: Please implement phase 1.");
+    expect(prompt).toContain("## Goal\nFinish phase 1.");
+    expect(prompt).toContain("Call create_handoff_context exactly once.");
   });
 
   it("rejects generated titles longer than 64 characters", async () => {
-    completeSimpleMock.mockResolvedValue({
-      role: "assistant",
-      api: "openai-responses",
-      provider: "openai",
-      model: "gpt-5.4",
-      usage: {
-        input: 1,
-        output: 1,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 2,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: "toolUse",
-      timestamp: Date.now(),
-      content: [
-        {
-          type: "toolCall",
-          id: "call-1",
-          name: "create_handoff_context",
-          arguments: {
-            title:
-              "This generated handoff title is intentionally much longer than sixty four characters",
-            summary: "The command is partly implemented.",
-            relevantFiles: [],
-            nextTask: "Finish phase 1 and verify it.",
-          },
-        },
-      ],
-    });
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession({
+        title:
+          "This generated handoff title is intentionally much longer than sixty four characters",
+        summary: "The command is partly implemented.",
+        relevantFiles: [],
+        nextTask: "Finish phase 1 and verify it.",
+      }),
+    );
 
     await expect(
       generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
     ).rejects.toThrow("Handoff title must be 64 characters or less.");
   });
 
-  it("rejects responses without the structured tool call", async () => {
-    completeSimpleMock.mockResolvedValue({
-      role: "assistant",
-      api: "openai-responses",
-      provider: "openai",
-      model: "gpt-5.4",
-      usage: {
-        input: 1,
-        output: 1,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 2,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: "stop",
-      timestamp: Date.now(),
-      content: [{ type: "text", text: "I forgot the tool call." }],
-    });
+  it("rejects extraction runs that do not call the structured tool", async () => {
+    createAgentSessionMock.mockResolvedValue(createMockAgentSession(undefined));
 
     await expect(
       generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
@@ -214,14 +176,37 @@ describe("session handoff extraction", () => {
   });
 });
 
-function createGenerationContext() {
+function createMockAgentSession(toolArguments: unknown, onPrompt?: (prompt: string) => void) {
   return {
-    model: { provider: "openai", id: "gpt-5.4", reasoning: true },
-    modelRegistry: {
-      async getApiKeyAndHeaders() {
-        return { ok: true, apiKey: "test-key", headers: undefined };
+    session: {
+      async prompt(prompt: string) {
+        onPrompt?.(prompt);
+        if (!toolArguments) {
+          return;
+        }
+
+        const [options] = createAgentSessionMock.mock.calls.at(-1) ?? [];
+        const [tool] = options.customTools;
+        await tool.execute("call-1", toolArguments);
       },
+      async abort() {},
+      dispose() {},
     },
+    extensionsResult: { extensions: [], errors: [] },
+  };
+}
+
+function createGenerationContext() {
+  const modelRegistry = {
+    async getApiKeyAndHeaders() {
+      return { ok: true, apiKey: "test-key", headers: undefined };
+    },
+  };
+
+  return {
+    cwd: "/tmp/project",
+    model: { provider: "openai", id: "gpt-5.4", reasoning: true },
+    modelRegistry,
     sessionManager: {
       getEntries() {
         return [
