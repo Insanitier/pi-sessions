@@ -1,5 +1,15 @@
 # Release Notes
 
+## v0.4.0
+
+Session index reliability and incremental hook indexing.
+
+- Fixed hook-maintained index writes under concurrent Pi processes by queueing writes with immediate SQLite transactions and connection-level busy timeouts.
+- Added incremental hook sync so unchanged sessions are skipped and appended session JSONL is indexed without rewriting existing rows.
+- Reduced lineage refresh work to the affected session family during hook updates.
+- Switched text search to external-content FTS5 triggers so indexed text stays in lockstep with stored chunks.
+- Bumped the session index schema to version 8; rebuild the index with `/session-index` if needed.
+
 ## v0.3.2
 
 Patch release for Bun-compatible session indexing and handoff reasoning settings.
