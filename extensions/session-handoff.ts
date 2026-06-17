@@ -1,5 +1,6 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { buildSessionContext } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, ModelSelectorComponent, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
@@ -72,13 +73,25 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         }
       }
 
+      const extractionModel = await pickHandoffExtractionModel(ctx);
+      if (!extractionModel) {
+        ctx.ui.notify("Cancelled", "info");
+        return;
+      }
+
       let generatedDraft: HandoffDraftResult | undefined;
       try {
         generatedDraft = await runWithLoader(
           ctx,
-          "Generating handoff draft...",
+          `Generating handoff draft (${extractionModel.provider}/${extractionModel.id})...`,
           async (signal: AbortSignal) =>
-            generateHandoffDraft(ctx, parsedArgs.goal, pi.getThinkingLevel(), signal),
+            generateHandoffDraft(
+              ctx,
+              parsedArgs.goal,
+              pi.getThinkingLevel(),
+              signal,
+              extractionModel,
+            ),
         );
       } catch (error) {
         ctx.ui.notify(formatHandoffError(error), "error");
@@ -230,6 +243,49 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         "\n\nWhen the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
     };
   });
+}
+
+async function pickHandoffExtractionModel(
+  ctx: ExtensionCommandContext,
+): Promise<Model<Api> | undefined> {
+  const preferredModel = getConfiguredHandoffExtractionModel(ctx) ?? ctx.model;
+  return ctx.ui.custom<Model<Api> | undefined>((tui, _theme, _keybindings, done) => {
+    const selector = new ModelSelectorComponent(
+      tui,
+      preferredModel,
+      SettingsManager.inMemory(),
+      ctx.modelRegistry,
+      [],
+      done,
+      () => done(undefined),
+    );
+
+    return selector;
+  });
+}
+
+function getConfiguredHandoffExtractionModel(
+  ctx: ExtensionCommandContext,
+): Model<Api> | undefined {
+  try {
+    const settings = SettingsManager.create(ctx.cwd).getGlobalSettings();
+    const spec =
+      settings && typeof settings === "object"
+        ? (settings as Record<string, unknown>).handoffExtractionModel
+        : undefined;
+    if (typeof spec !== "string") {
+      return undefined;
+    }
+
+    const slashIndex = spec.indexOf("/");
+    if (slashIndex <= 0 || slashIndex === spec.length - 1) {
+      return undefined;
+    }
+
+    return ctx.modelRegistry.find(spec.slice(0, slashIndex), spec.slice(slashIndex + 1));
+  } catch {
+    return undefined;
+  }
 }
 
 async function runWithLoader<T>(

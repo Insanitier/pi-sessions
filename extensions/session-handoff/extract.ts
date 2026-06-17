@@ -88,12 +88,12 @@ export async function generateHandoffDraft(
   goal: string,
   thinkingLevel: ThinkingLevel | undefined,
   signal?: AbortSignal,
+  extractionModel?: Model<Api>,
 ): Promise<HandoffDraftResult | undefined> {
-  if (!ctx.model) {
+  const model = extractionModel ?? ctx.model;
+  if (!model) {
     throw new Error("No model is available for handoff.");
   }
-
-  const model = ctx.model;
   const sessionContext = buildSessionContext(
     ctx.sessionManager.getEntries(),
     ctx.sessionManager.getLeafId(),
