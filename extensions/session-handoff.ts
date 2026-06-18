@@ -152,19 +152,27 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
+      const handoffModelSettings = SettingsManager.create(ctx.cwd);
+      const previousProvider = handoffModelSettings.getDefaultProvider();
+      const previousModel = handoffModelSettings.getDefaultModel();
+      handoffModelSettings.setDefaultModelAndProvider(extractionModel.provider, extractionModel.id);
+
       const switchResult = await ctx.newSession({
         parentSession: parentSessionFile,
         setup: async (sessionManager) => {
           sessionManager.appendSessionInfo(handoffMetadata.title);
           sessionManager.appendCustomEntry(HANDOFF_METADATA_CUSTOM_TYPE, handoffMetadata);
+          sessionManager.appendModelChange(extractionModel.provider, extractionModel.id);
         },
         withSession: async (nextCtx) => {
-          await pi.setModel(extractionModel);
           startHandoffPromptAfterSessionRender(nextCtx, approvedDraft);
         },
       });
 
       if (switchResult.cancelled) {
+        if (previousProvider && previousModel) {
+          handoffModelSettings.setDefaultModelAndProvider(previousProvider, previousModel);
+        }
         ctx.ui.notify("Session switch cancelled", "info");
       }
     },
