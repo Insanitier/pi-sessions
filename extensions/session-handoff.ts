@@ -159,6 +159,7 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
           sessionManager.appendCustomEntry(HANDOFF_METADATA_CUSTOM_TYPE, handoffMetadata);
         },
         withSession: async (nextCtx) => {
+          await pi.setModel(extractionModel);
           startHandoffPromptAfterSessionRender(nextCtx, approvedDraft);
         },
       });
