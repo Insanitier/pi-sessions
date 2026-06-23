@@ -10,10 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { HANDOFF_BOOTSTRAP_ENV } from "./metadata.js";
 
-const GHOSTTY_MACOS_ONLY_MESSAGE = "Split handoff currently supports Ghostty on macOS only.";
-const GHOSTTY_REQUIRED_MESSAGE = "Split handoff requires running inside Ghostty.";
-const GHOSTTY_SPLIT_TIMEOUT_MS = 15_000;
-const OSASCRIPT_PATH = "/usr/bin/osascript";
+const TMUX_SPLIT_TIMEOUT_MS = 15_000;
 
 export type HandoffSplitDirection = "left" | "right" | "up" | "down";
 
@@ -30,12 +27,8 @@ export async function validateSplitHandoffPrerequisites(
     return "Split handoff requires a persisted current session.";
   }
 
-  if (process.platform !== "darwin") {
-    return GHOSTTY_MACOS_ONLY_MESSAGE;
-  }
-
-  if (process.env.TERM_PROGRAM !== "ghostty") {
-    return GHOSTTY_REQUIRED_MESSAGE;
+  if (!process.env.TMUX) {
+    return "Split handoff requires running inside tmux.";
   }
 
   return undefined;
@@ -94,21 +87,25 @@ export async function launchSplitHandoffSession(
     options.bootstrapValue,
     options.title,
   );
-  const escapedCwd = escapeAppleScriptString(options.cwd);
-  const escapedCommand = escapeAppleScriptString(piCommand);
-  const appleScript = [
-    'tell application "Ghostty"',
-    "    set targetTerminal to focused terminal of selected tab of front window",
-    "    set cfg to new surface configuration",
-    `    set initial working directory of cfg to "${escapedCwd}"`,
-    `    set command of cfg to "${escapedCommand}"`,
-    `    set newTerminal to split targetTerminal direction ${options.direction} with configuration cfg`,
-    "    focus targetTerminal",
-    "end tell",
-  ].join("\n");
-  const result = await pi.exec(OSASCRIPT_PATH, ["-e", appleScript], {
+
+  // tmux split-window direction mapping
+  const tmuxDirectionFlag =
+    options.direction === "left" || options.direction === "right" ? "-h" : "-v";
+  const tmuxBeforeFlag = options.direction === "left" || options.direction === "up" ? "-b" : null;
+
+  const tmuxArgs = [
+    "split-window",
+    tmuxDirectionFlag,
+    ...(tmuxBeforeFlag ? [tmuxBeforeFlag] : []),
+    "-c",
+    options.cwd,
+    "-d",
+    piCommand,
+  ];
+
+  const result = await pi.exec("tmux", tmuxArgs, {
     cwd: options.cwd,
-    timeout: GHOSTTY_SPLIT_TIMEOUT_MS,
+    timeout: TMUX_SPLIT_TIMEOUT_MS,
   });
 
   if (result.code === 0) {
@@ -118,9 +115,7 @@ export async function launchSplitHandoffSession(
   const details = `${result.stderr || result.stdout}`.trim() || `exit code ${result.code}`;
   return {
     success: false,
-    error:
-      `Failed to launch Ghostty split: ${details}. ` +
-      "Split handoff currently supports Ghostty on macOS only.",
+    error: `Failed to launch tmux split: ${details}. Split handoff requires running inside tmux.`,
   };
 }
 
@@ -150,12 +145,10 @@ export function buildPiLaunchCommand(
   bootstrapValue: string,
   title: string,
 ): string {
+  // ponytail: wraps pi in a login shell so the new pane has a normal zsh environment.
+  // If the user's shell isn't zsh, update the path here.
   const payload = `${buildPiResumeCommand(sessionDir, sessionId, bootstrapValue, title)}; exec /bin/zsh -il`;
   return `/bin/zsh -ilc ${shellQuote(payload)}`;
-}
-
-function escapeAppleScriptString(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function shellQuote(value: string): string {

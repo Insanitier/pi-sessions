@@ -14,6 +14,8 @@ export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
   nextTask: Type.String(),
   title: Type.String(),
   initial_prompt: Type.String(),
+  extractionModelProvider: Type.Optional(Type.String()),
+  extractionModelId: Type.Optional(Type.String()),
 });
 
 export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
@@ -22,6 +24,8 @@ export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   nextTask: Type.String(),
   title: Type.String(),
   initialPrompt: Type.String(),
+  modelProvider: Type.Optional(Type.String()),
+  modelId: Type.Optional(Type.String()),
 });
 
 export type HandoffSessionMetadata = Static<typeof HANDOFF_SESSION_METADATA_SCHEMA>;
@@ -32,6 +36,8 @@ export function createHandoffSessionMetadata(
   nextTask: string,
   initialPrompt: string,
   title: string,
+  extractionModelProvider?: string,
+  extractionModelId?: string,
 ): HandoffSessionMetadata {
   const normalizedGoal = goal.trim();
   const normalizedNextTask = nextTask.trim() || normalizedGoal;
@@ -42,12 +48,16 @@ export function createHandoffSessionMetadata(
     nextTask: normalizedNextTask,
     title,
     initial_prompt: initialPrompt.trim(),
+    ...(extractionModelProvider ? { extractionModelProvider } : {}),
+    ...(extractionModelId ? { extractionModelId } : {}),
   };
 }
 
 export function createHandoffBootstrap(
   sessionId: string,
   metadata: HandoffSessionMetadata,
+  modelProvider?: string,
+  modelId?: string,
 ): HandoffBootstrap {
   return {
     sessionId,
@@ -55,6 +65,8 @@ export function createHandoffBootstrap(
     nextTask: metadata.nextTask,
     title: metadata.title,
     initialPrompt: metadata.initial_prompt,
+    ...(modelProvider ? { modelProvider } : {}),
+    ...(modelId ? { modelId } : {}),
   };
 }
 

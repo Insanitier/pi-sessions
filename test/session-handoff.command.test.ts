@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HANDOFF_BOOTSTRAP_ENV,
@@ -42,6 +43,9 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   delete process.env[HANDOFF_BOOTSTRAP_ENV];
+
+  // ModelSelectorComponent needs a global theme
+  initTheme();
 
   mockLoadSettings.mockReturnValue({
     handoff: { pickerShortcut: "alt+o" },
@@ -122,6 +126,7 @@ describe("session handoff command", () => {
         "pi-sessions.handoff",
         expect.objectContaining({ title: "Finish phase 1" }),
       );
+      expect(ctx.sessionSetup.appendModelChange).toHaveBeenCalledWith("openai", "gpt-5.4");
       expect(ctx.ui.notify).not.toHaveBeenCalledWith("Handoff started in a new session.", "info");
       expect(ctx.replacementContext.sendUserMessage).not.toHaveBeenCalled();
 
@@ -172,12 +177,14 @@ describe("session handoff command", () => {
       nextTask: "Task",
       title: "Finish phase 1",
       initialPrompt: "Approved handoff draft",
+      modelProvider: "openai",
+      modelId: "gpt-5.4",
     });
   });
 
   it("fails loudly when split-pane preflight fails", async () => {
     mockValidateSplitHandoffPrerequisites.mockResolvedValue(
-      "Split handoff requires running inside Ghostty.",
+      "Split handoff requires running inside tmux.",
     );
     const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
@@ -186,7 +193,7 @@ describe("session handoff command", () => {
 
     expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Split handoff requires running inside Ghostty.",
+      "Split handoff requires running inside tmux.",
       "error",
     );
   });
@@ -194,8 +201,7 @@ describe("session handoff command", () => {
   it("reports the created session id when split-pane launch fails", async () => {
     mockLaunchSplitHandoffSession.mockResolvedValue({
       success: false,
-      error:
-        "Failed to launch Ghostty split: boom. Split handoff currently supports Ghostty on macOS only.",
+      error: "Failed to launch tmux split: boom. Split handoff requires running inside tmux.",
     });
     const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
@@ -204,7 +210,7 @@ describe("session handoff command", () => {
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining(
-        "Failed to launch Ghostty split: boom. Split handoff currently supports Ghostty on macOS only. Created handoff session child-session-123; start it manually with: PI_SESSIONS_HANDOFF_BOOTSTRAP=",
+        "Failed to launch tmux split: boom. Split handoff requires running inside tmux. Created handoff session child-session-123; start it manually with: PI_SESSIONS_HANDOFF_BOOTSTRAP=",
       ),
       "error",
     );
@@ -291,6 +297,7 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
   const sessionSetup = {
     appendSessionInfo: vi.fn(),
     appendCustomEntry: vi.fn(),
+    appendModelChange: vi.fn(),
   };
 
   const replacementContext = {
@@ -302,33 +309,56 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
     },
   };
 
+  // ModelRegistry mock needed by ModelSelectorComponent and
+  // getConfiguredHandoffExtractionModel
+  const modelRegistry = {
+    refresh: vi.fn(),
+    getError: vi.fn().mockReturnValue(undefined),
+    getAvailable: vi.fn().mockResolvedValue([{ provider: "openai", id: "gpt-5.4" }]),
+    find: vi.fn().mockImplementation((provider: string, id: string) => ({ provider, id }) as never),
+  };
+
+  const defaultModel = { provider: "openai", id: "gpt-5.4" };
+
   return {
     cwd: "/tmp/project",
     mode: "tui",
     hasUI: true,
-    model: { provider: "openai", id: "gpt-5.4" },
+    model: defaultModel,
+    modelRegistry,
     ui: {
       notify: vi.fn(),
-      custom: vi.fn(async (factory: (...args: unknown[]) => unknown) => {
-        return await new Promise((resolve) => {
-          factory(
-            { requestRender() {} },
-            {
-              fg(_color: string, text: string) {
-                return text;
-              },
-              bold(text: string) {
-                return text;
-              },
-              bg(_color: string, text: string) {
-                return text;
-              },
-            },
-            undefined,
-            resolve,
-          );
-        });
-      }),
+      // ponytail: ui.custom mock that differentiates between overlay-based
+      // task runners (runWithLoader passes options.overlay) and interactive
+      // selectors (ModelSelectorComponent, no overlay option). The latter
+      // returns the default model immediately to avoid hangs.
+      custom: vi.fn(
+        async (factory: (...args: unknown[]) => unknown, options?: { overlay?: boolean }) => {
+          if (options?.overlay) {
+            // runWithLoader pattern: factory calls task().then(done)
+            return await new Promise((resolve) => {
+              factory(
+                { requestRender() {} },
+                {
+                  fg(_color: string, text: string) {
+                    return text;
+                  },
+                  bold(text: string) {
+                    return text;
+                  },
+                  bg(_color: string, text: string) {
+                    return text;
+                  },
+                },
+                undefined,
+                resolve,
+              );
+            });
+          }
+          // ModelSelectorComponent pattern: return default model immediately
+          return defaultModel;
+        },
+      ),
       editor: vi.fn(),
     },
     sessionManager: {

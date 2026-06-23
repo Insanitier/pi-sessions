@@ -19,7 +19,7 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  delete process.env.TERM_PROGRAM;
+  delete process.env.TMUX;
 });
 
 describe("session handoff spawn helpers", () => {
@@ -98,10 +98,8 @@ describe("session handoff spawn helpers", () => {
     );
   });
 
-  it("fails split preflight outside macOS", async () => {
-    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
-    process.env.TERM_PROGRAM = "ghostty";
-
+  it("fails split preflight outside tmux", async () => {
+    // TMUX env not set
     const pi = createPiApi();
     const ctx = {
       cwd: "/tmp/project",
@@ -113,13 +111,12 @@ describe("session handoff spawn helpers", () => {
     };
 
     await expect(validateSplitHandoffPrerequisites(pi as never, ctx as never)).resolves.toBe(
-      "Split handoff currently supports Ghostty on macOS only.",
+      "Split handoff requires running inside tmux.",
     );
   });
 
-  it("fails split preflight when not running inside Ghostty", async () => {
-    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-
+  it("passes split preflight when running inside tmux", async () => {
+    process.env.TMUX = "/tmp/tmux-xxx/default,123,0";
     const pi = createPiApi();
     const ctx = {
       cwd: "/tmp/project",
@@ -130,12 +127,12 @@ describe("session handoff spawn helpers", () => {
       },
     };
 
-    await expect(validateSplitHandoffPrerequisites(pi as never, ctx as never)).resolves.toBe(
-      "Split handoff requires running inside Ghostty.",
-    );
+    await expect(
+      validateSplitHandoffPrerequisites(pi as never, ctx as never),
+    ).resolves.toBeUndefined();
   });
 
-  it("launches Ghostty via osascript with focus pinned to the original pane", async () => {
+  it("launches tmux split-window with direction flags and keeps focus on the original pane", async () => {
     const pi = createPiApi({ code: 0 });
     const bootstrapValue = Buffer.from(
       JSON.stringify(createHandoffBootstrap("child-session-123", createMetadata())),
@@ -152,26 +149,82 @@ describe("session handoff spawn helpers", () => {
     });
 
     expect(result).toEqual({ success: true });
-    expect(pi.exec).toHaveBeenCalledWith("/usr/bin/osascript", ["-e", expect.any(String)], {
+    expect(pi.exec).toHaveBeenCalledWith("tmux", expect.any(Array), {
       cwd: "/tmp/project",
       timeout: 15_000,
     });
 
-    const osascriptArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
-    const appleScript = osascriptArgs[1] ?? "";
-    expect(appleScript).toContain('tell application "Ghostty"');
-    expect(appleScript).toContain("set cfg to new surface configuration");
-    expect(appleScript).toContain('set initial working directory of cfg to "/tmp/project"');
-    expect(appleScript).toContain("split targetTerminal direction right with configuration cfg");
-    expect(appleScript).toContain("focus targetTerminal");
-    expect(appleScript).toContain(HANDOFF_BOOTSTRAP_ENV);
-    expect(appleScript).toContain("child-session-123");
-    expect(appleScript).toContain("/tmp/sessions");
-    expect(appleScript).toContain("Implement autocomplete");
+    const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+    expect(tmuxArgs[0]).toBe("split-window");
+    expect(tmuxArgs).toContain("-h");
+    expect(tmuxArgs).toContain("-d");
+    // The env var is inside the shell command (last arg), not a direct tmux arg
+    const lastArg = tmuxArgs[tmuxArgs.length - 1] ?? "";
+    expect(lastArg).toContain(HANDOFF_BOOTSTRAP_ENV);
+    expect(lastArg).toContain("child-session-123");
+    expect(lastArg).toContain("/tmp/sessions");
+    expect(lastArg).toContain("Implement autocomplete");
   });
 
-  it("reports AppleScript launch failures with a macOS Ghostty hint", async () => {
-    const pi = createPiApi({ code: 1, stderr: "execution error: Ghostty got an error" });
+  it("maps left direction to horizontal before", async () => {
+    const pi = createPiApi({ code: 0 });
+
+    const result = await launchSplitHandoffSession(pi as never, {
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      direction: "left",
+      sessionId: "child-session-123",
+      bootstrapValue: "encoded",
+      title: "Title",
+    });
+
+    expect(result).toEqual({ success: true });
+    const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+    expect(tmuxArgs).toContain("-h");
+    expect(tmuxArgs).toContain("-b");
+    expect(tmuxArgs).toContain("-d");
+  });
+
+  it("maps up direction to vertical before", async () => {
+    const pi = createPiApi({ code: 0 });
+
+    const result = await launchSplitHandoffSession(pi as never, {
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      direction: "up",
+      sessionId: "child-session-123",
+      bootstrapValue: "encoded",
+      title: "Title",
+    });
+
+    expect(result).toEqual({ success: true });
+    const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+    expect(tmuxArgs).toContain("-v");
+    expect(tmuxArgs).toContain("-b");
+    expect(tmuxArgs).toContain("-d");
+  });
+
+  it("maps down direction to vertical default", async () => {
+    const pi = createPiApi({ code: 0 });
+
+    const result = await launchSplitHandoffSession(pi as never, {
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      direction: "down",
+      sessionId: "child-session-123",
+      bootstrapValue: "encoded",
+      title: "Title",
+    });
+
+    expect(result).toEqual({ success: true });
+    const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+    expect(tmuxArgs).toContain("-v");
+    expect(tmuxArgs).not.toContain("-b");
+    expect(tmuxArgs).toContain("-d");
+  });
+
+  it("reports tmux launch failures with a tmux hint", async () => {
+    const pi = createPiApi({ code: 1, stderr: "error: can't connect to tmux" });
 
     const result = await launchSplitHandoffSession(pi as never, {
       cwd: "/tmp/project",
@@ -185,8 +238,8 @@ describe("session handoff spawn helpers", () => {
     expect(result).toEqual({
       success: false,
       error:
-        "Failed to launch Ghostty split: execution error: Ghostty got an error. " +
-        "Split handoff currently supports Ghostty on macOS only.",
+        "Failed to launch tmux split: error: can't connect to tmux. " +
+        "Split handoff requires running inside tmux.",
     });
   });
 

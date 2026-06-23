@@ -1,6 +1,10 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { buildSessionContext, ModelSelectorComponent, SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+  buildSessionContext,
+  ModelSelectorComponent,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
@@ -120,6 +124,8 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         generatedDraft.context.nextTask,
         approvedDraft,
         generatedDraft.context.title,
+        parsedArgs.splitDirection ? extractionModel.provider : undefined,
+        parsedArgs.splitDirection ? extractionModel.id : undefined,
       );
       if (parsedArgs.splitDirection) {
         const createdSession = createHandoffSession({
@@ -129,7 +135,12 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
           title: handoffMetadata.title,
         });
         const bootstrapValue = encodeHandoffBootstrap(
-          createHandoffBootstrap(createdSession.sessionId, handoffMetadata),
+          createHandoffBootstrap(
+            createdSession.sessionId,
+            handoffMetadata,
+            extractionModel.provider,
+            extractionModel.id,
+          ),
         );
         const launchResult = await launchSplitHandoffSession(pi, {
           cwd: ctx.cwd,
@@ -231,12 +242,27 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
             bootstrap.nextTask,
             bootstrap.initialPrompt,
             bootstrap.title,
+            bootstrap.modelProvider,
+            bootstrap.modelId,
           ),
         );
       }
 
       if (!ctx.sessionManager.getSessionName()) {
         pi.setSessionName(bootstrap.title);
+      }
+
+      // Set model from bootstrap for split-pane handoff (new extension runtime, safe to use pi.setModel)
+      if (bootstrap.modelProvider && bootstrap.modelId) {
+        const availableModels = ctx.modelRegistry?.getAvailable() ?? [];
+        const model = availableModels.find(
+          (m: Model<Api>) => m.provider === bootstrap.modelProvider && m.id === bootstrap.modelId,
+        );
+        if (model) {
+          await pi.setModel(model);
+        } else {
+          // ponytail: model not found; falls back to default. Log if needed.
+        }
       }
 
       pi.sendUserMessage(bootstrap.initialPrompt);
@@ -273,9 +299,7 @@ async function pickHandoffExtractionModel(
   });
 }
 
-function getConfiguredHandoffExtractionModel(
-  ctx: ExtensionCommandContext,
-): Model<Api> | undefined {
+function getConfiguredHandoffExtractionModel(ctx: ExtensionCommandContext): Model<Api> | undefined {
   try {
     const settings = SettingsManager.create(ctx.cwd).getGlobalSettings();
     const spec =
