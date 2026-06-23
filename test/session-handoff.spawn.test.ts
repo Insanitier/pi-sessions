@@ -69,7 +69,7 @@ describe("session handoff spawn helpers", () => {
     expect(resumeCommand).toContain("Implement autocomplete");
   });
 
-  it("builds a zsh launch command around the bootstrap-aware resume command", () => {
+  it("builds a bootstrap-aware pi launch command without shell-specific wrappers", () => {
     const launchCommand = buildPiLaunchCommand(
       "/tmp/sessions",
       "child-session-123",
@@ -79,7 +79,7 @@ describe("session handoff spawn helpers", () => {
 
     expect(launchCommand).toContain(HANDOFF_BOOTSTRAP_ENV);
     expect(launchCommand).toContain("encoded-bootstrap");
-    expect(launchCommand).toContain("exec /bin/zsh -il");
+    expect(launchCommand).not.toContain("/bin/zsh");
   });
 
   it("fails split preflight when the current session is not persisted", async () => {
@@ -132,7 +132,7 @@ describe("session handoff spawn helpers", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("launches tmux split-window with direction flags and keeps focus on the original pane", async () => {
+  it("launches tmux split-window with pane id output", async () => {
     const pi = createPiApi({ code: 0 });
     const bootstrapValue = Buffer.from(
       JSON.stringify(createHandoffBootstrap("child-session-123", createMetadata())),
@@ -157,7 +157,10 @@ describe("session handoff spawn helpers", () => {
     const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
     expect(tmuxArgs[0]).toBe("split-window");
     expect(tmuxArgs).toContain("-h");
-    expect(tmuxArgs).toContain("-d");
+    expect(tmuxArgs).toContain("-P");
+    expect(tmuxArgs).toContain("-F");
+    expect(tmuxArgs).toContain("#{pane_id}");
+    expect(tmuxArgs).not.toContain("-d");
     // The env var is inside the shell command (last arg), not a direct tmux arg
     const lastArg = tmuxArgs[tmuxArgs.length - 1] ?? "";
     expect(lastArg).toContain(HANDOFF_BOOTSTRAP_ENV);
@@ -182,7 +185,6 @@ describe("session handoff spawn helpers", () => {
     const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
     expect(tmuxArgs).toContain("-h");
     expect(tmuxArgs).toContain("-b");
-    expect(tmuxArgs).toContain("-d");
   });
 
   it("maps up direction to vertical before", async () => {
@@ -201,7 +203,6 @@ describe("session handoff spawn helpers", () => {
     const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
     expect(tmuxArgs).toContain("-v");
     expect(tmuxArgs).toContain("-b");
-    expect(tmuxArgs).toContain("-d");
   });
 
   it("maps down direction to vertical default", async () => {
@@ -220,7 +221,6 @@ describe("session handoff spawn helpers", () => {
     const tmuxArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
     expect(tmuxArgs).toContain("-v");
     expect(tmuxArgs).not.toContain("-b");
-    expect(tmuxArgs).toContain("-d");
   });
 
   it("reports tmux launch failures with a tmux hint", async () => {

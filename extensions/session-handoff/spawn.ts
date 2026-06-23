@@ -88,18 +88,20 @@ export async function launchSplitHandoffSession(
     options.title,
   );
 
-  // tmux split-window direction mapping
   const tmuxDirectionFlag =
     options.direction === "left" || options.direction === "right" ? "-h" : "-v";
-  const tmuxBeforeFlag = options.direction === "left" || options.direction === "up" ? "-b" : null;
+  const tmuxBeforeFlag =
+    options.direction === "left" || options.direction === "up" ? "-b" : undefined;
 
   const tmuxArgs = [
     "split-window",
     tmuxDirectionFlag,
     ...(tmuxBeforeFlag ? [tmuxBeforeFlag] : []),
+    "-P",
+    "-F",
+    "#{pane_id}",
     "-c",
     options.cwd,
-    "-d",
     piCommand,
   ];
 
@@ -145,10 +147,7 @@ export function buildPiLaunchCommand(
   bootstrapValue: string,
   title: string,
 ): string {
-  // ponytail: wraps pi in a login shell so the new pane has a normal zsh environment.
-  // If the user's shell isn't zsh, update the path here.
-  const payload = `${buildPiResumeCommand(sessionDir, sessionId, bootstrapValue, title)}; exec /bin/zsh -il`;
-  return `/bin/zsh -ilc ${shellQuote(payload)}`;
+  return buildPiResumeCommand(sessionDir, sessionId, bootstrapValue, title);
 }
 
 function shellQuote(value: string): string {
