@@ -59,7 +59,6 @@ beforeEach(() => {
       summary: "Summary",
       relevantFiles: [],
       nextTask: "Task",
-      openQuestions: [],
     },
     sessionId: "session-123",
     sessionPath: "/tmp/session.jsonl",

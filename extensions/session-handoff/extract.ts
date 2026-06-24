@@ -22,22 +22,25 @@ import { type Static, Type } from "typebox";
 import { parseTypeBoxValue } from "../shared/typebox.js";
 
 const MAX_RELEVANT_FILES = 12;
-const MAX_OPEN_QUESTIONS = 8;
-const MAX_HANDOFF_TITLE_LENGTH = 64;
 
-const HANDOFF_SYSTEM_PROMPT = `You extract context for a deliberate session handoff.
+const HANDOFF_SYSTEM_PROMPT = `You are an expert technical lead preparing a deliberate session handoff. Your goal is to equip a fresh agent with the precise context needed to seamlessly continue the work.
 
-You must call create_handoff_context exactly once.
+You must call the handoff tool (e.g., create_handoff_context) exactly once to generate the document.
 
-Rules:
-- Extract only context that is relevant to the next task.
-- Keep the summary compact and concrete.
-- Prefer workspace-relative file paths when possible.
-- title must be a short session title for the new handoff thread, 64 characters or less, without prefixes like "Handoff:" or otherwise referencing the current thread.
-- nextTask must be the concrete next action for the new session.
-- openQuestions should contain only unresolved items that materially affect the next task.
-- If there are no meaningful open questions, omit openQuestions entirely.
-- Do not write the final handoff prompt yourself.`;
+Adhere to these professional guidelines when constructing the context:
+
+### 1. Core Context (Lean & Concrete)
+- **title**: Ultra-short, 3 to 6 words. Think of it like a Git commit title. No prefixes like "Handoff:".
+- **nextTask**: The concrete, immediate next action. If the user passed arguments, use them to strictly tailor this task.
+- **summary**: High-signal summary of the current state. Extract only context materially relevant to the next task.
+
+### 2. Information Hygiene (Crucial Subtractions)
+- **Reference, Don't Duplicate**: Never copy content already captured in artifacts (PRDs, plans, ADRs, issues, commits, diffs). Reference them via workspace-relative paths or URLs to save context window.
+- **Security**: Automatically redact sensitive information (API keys, passwords, tokens, PII) before finalizing the document.
+
+### Constraints
+- Prefer workspace-relative file paths when referencing existing code.
+- Do not write the final execution prompt for the next agent yourself; focus solely on the context document.`;
 
 const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
   title: Type.String({
@@ -52,11 +55,6 @@ const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
   nextTask: Type.String({
     description: "The concrete next task for the new session.",
   }),
-  openQuestions: Type.Optional(
-    Type.Array(Type.String(), {
-      description: "Open questions that matter to the next task. Omit when there are none.",
-    }),
-  ),
 });
 
 type HandoffExtractionArgs = Static<typeof HANDOFF_EXTRACTION_PARAMETERS>;
@@ -73,7 +71,6 @@ export interface HandoffContext {
   summary: string;
   relevantFiles: string[];
   nextTask: string;
-  openQuestions: string[];
 }
 
 export interface HandoffDraftResult {
@@ -242,15 +239,6 @@ export function assembleHandoffDraft(
     sections.push(["## Context", handoffContext.summary].join("\n"));
   }
 
-  if (handoffContext.openQuestions.length > 0) {
-    sections.push(
-      [
-        "## Open Questions",
-        ...handoffContext.openQuestions.map((question) => `- ${question}`),
-      ].join("\n"),
-    );
-  }
-
   return sections.join("\n\n").trim();
 }
 
@@ -282,14 +270,9 @@ function extractHandoffContextFromArguments(
   }
 
   const title = normalizeText(requiredArguments.title);
-  if (title.length > MAX_HANDOFF_TITLE_LENGTH) {
-    return { error: "Handoff title must be 64 characters or less." };
-  }
-
   const summary = normalizeText(requiredArguments.summary);
   const relevantFiles = getRelevantFiles(argumentsValue);
   const nextTask = normalizeText(requiredArguments.nextTask) || goal.trim();
-  const openQuestions = getOpenQuestions(argumentsValue);
 
   if (!summary || !nextTask || !title) {
     return { error: "Handoff extraction did not return structured context." };
@@ -301,7 +284,6 @@ function extractHandoffContextFromArguments(
       summary,
       relevantFiles,
       nextTask,
-      openQuestions,
     },
   };
 }
@@ -337,14 +319,6 @@ function getRelevantFiles(argumentsValue: unknown): string[] {
   }
 
   return normalizeStringArray(argumentsValue.relevantFiles, MAX_RELEVANT_FILES);
-}
-
-function getOpenQuestions(argumentsValue: unknown): string[] {
-  if (!isRecord(argumentsValue)) {
-    return [];
-  }
-
-  return normalizeStringArray(argumentsValue.openQuestions, MAX_OPEN_QUESTIONS);
 }
 
 function normalizeText(value: unknown): string {

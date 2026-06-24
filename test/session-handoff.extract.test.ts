@@ -32,7 +32,6 @@ describe("session handoff extraction", () => {
         summary: "Relevant context only.",
         relevantFiles: ["src/index.ts", "README.md"],
         nextTask: "Implement the command.",
-        openQuestions: [],
       },
       "Ignored fallback goal",
     );
@@ -73,7 +72,6 @@ describe("session handoff extraction", () => {
               summary: "  Keep this.  ",
               relevantFiles: [" src/index.ts ", "src/index.ts", "", 1],
               nextTask: "  Implement the command. ",
-              openQuestions: [" Should tests cover cancel? ", "", null],
             },
           },
         ],
@@ -87,7 +85,6 @@ describe("session handoff extraction", () => {
         summary: "Keep this.",
         relevantFiles: ["src/index.ts"],
         nextTask: "Implement the command.",
-        openQuestions: ["Should tests cover cancel?"],
       },
     });
   });
@@ -99,7 +96,6 @@ describe("session handoff extraction", () => {
         summary: "The command is partly implemented.",
         relevantFiles: ["extensions/session-handoff.ts"],
         nextTask: "Finish phase 1 and verify it.",
-        openQuestions: ["Should the preview use an overlay?"],
       }),
     );
 
@@ -114,7 +110,6 @@ describe("session handoff extraction", () => {
     expect(result?.draft).toContain("## Task\nFinish phase 1 and verify it.");
     expect(result?.draft).toContain("## Relevant Files\n- extensions/session-handoff.ts");
     expect(result?.draft).toContain("## Context\nThe command is partly implemented.");
-    expect(result?.draft).toContain("## Open Questions\n- Should the preview use an overlay?");
 
     const [options] = createAgentSessionMock.mock.calls[0] ?? [];
     expect(options).toMatchObject({
@@ -141,22 +136,6 @@ describe("session handoff extraction", () => {
     expect(prompt).toContain("## Conversation\n[User]: Please implement phase 1.");
     expect(prompt).toContain("## Goal\nFinish phase 1.");
     expect(prompt).toContain("Call create_handoff_context exactly once.");
-  });
-
-  it("rejects generated titles longer than 64 characters", async () => {
-    createAgentSessionMock.mockResolvedValue(
-      createMockAgentSession({
-        title:
-          "This generated handoff title is intentionally much longer than sixty four characters",
-        summary: "The command is partly implemented.",
-        relevantFiles: [],
-        nextTask: "Finish phase 1 and verify it.",
-      }),
-    );
-
-    await expect(
-      generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
-    ).rejects.toThrow("Handoff title must be 64 characters or less.");
   });
 
   it("rejects extraction runs that do not call the structured tool", async () => {
